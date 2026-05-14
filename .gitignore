@@ -1,0 +1,7 @@
+node_modules/
+.env
+polls.json
+.group
+server.log
+.DS_Store
+*.log
