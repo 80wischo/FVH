@@ -10,7 +10,9 @@ const DEFAULT_STATE = {
     trainingLocation: 'Sportplatz FVH',
     trainingExceptions: [],
     trainingThreshold: 3,
-    useWeather: true
+    useWeather: true,
+    season: '26/27',
+    seasons: ['25/26', '26/27']
   },
   trainingActive: false,
   trainingStart: null,
@@ -26,6 +28,8 @@ let timerSeconds = 0;
 let currentTrainingAttendance = {};
 let currentTrainingDate = null;
 let matchKaderSelection = {};
+let playerExpanded = {};
+let historySeasonFilter = null;
 
 const FORMATIONS = {
   '2-3-1': { name: '2-3-1', desc: '2 Abwehr · 3 Mittelfeld · 1 Sturm', positions: [
@@ -66,13 +70,22 @@ function loadState() {
 
 function migrateState() {
   if (!state.laundryHistory) state.laundryHistory = [];
+  if (!state.settings.season) state.settings.season = '26/27';
+  if (!state.settings.seasons) state.settings.seasons = ['25/26', '26/27'];
   if (state.players) {
     state.players.forEach(p => {
       if (!p.rating) p.rating = { fitness: 3, technique: 3, matchPerf: 3 };
     });
   }
+  if (state.trainings) {
+    state.trainings.forEach(t => {
+      if (!t.season) t.season = '25/26';
+    });
+  }
   if (state.matches) {
     state.matches.forEach(m => {
+      if (!m.season) m.season = '25/26';
+      if (!m.playerRatings) m.playerRatings = {};
       if (m.kader === undefined) m.kader = null;
       if (m.lineup === undefined) m.lineup = null;
       if (!m.tasks) m.tasks = {};
@@ -176,22 +189,45 @@ function getCurrentWeekTrainings() {
   return state.trainings.filter(t => t.date >= mondayStr && t.date <= sundayStr);
 }
 
-function getPlayerAttendancePct(playerId) {
-  const total = state.trainings.length;
+function getSeasonTrainings(season) {
+  return state.trainings.filter(t => (t.season || '25/26') === (season || state.settings.season));
+}
+
+function getSeasonMatches(season) {
+  return state.matches.filter(m => (m.season || '25/26') === (season || state.settings.season));
+}
+
+function getPlayerAttendancePct(playerId, season) {
+  const seasonTrainings = getSeasonTrainings(season);
+  const total = seasonTrainings.length;
   if (total === 0) return 0;
-  let attended = 0;
-  for (const t of state.trainings) {
+
+  const cutoff = new Date();
+  cutoff.setDate(cutoff.getDate() - 28);
+  const cutoffStr = cutoff.getFullYear() + '-' + String(cutoff.getMonth()+1).padStart(2,'0') + '-' + String(cutoff.getDate()).padStart(2,'0');
+
+  let weightedAttended = 0;
+  let weightedDenom = 0;
+
+  for (const t of seasonTrainings) {
+    const w = t.date >= cutoffStr ? 3 : 1;
+    weightedDenom += w;
     const a = t.attendance && t.attendance[playerId];
     if (!a) continue;
     const status = typeof a === 'string' ? a : (a.status || '');
-    if (status === 'yes' || status === 'late') attended++;
+    if (status === 'yes' || status === 'late') {
+      weightedAttended += w;
+    }
   }
-  return Math.round(attended / total * 100);
+
+  if (weightedDenom === 0) return 0;
+  return Math.round(weightedAttended / weightedDenom * 100);
 }
 
-function getPlayerBehaviorPct(playerId) {
+function getPlayerBehaviorPct(playerId, season) {
+  const seasonTrainings = getSeasonTrainings(season);
   let total = 0, good = 0;
-  for (const t of state.trainings) {
+  for (const t of seasonTrainings) {
     const a = t.attendance && t.attendance[playerId];
     if (!a || typeof a === 'string') continue;
     const status = a.status || '';
@@ -219,18 +255,11 @@ function getScheduledTrainingsInMonth(year, month) {
 }
 
 function getTrainingCount(playerId) {
-  const now = new Date();
-  const fourWeeksAgo = new Date(now);
-  fourWeeksAgo.setDate(fourWeeksAgo.getDate() - 28);
-  const since = fourWeeksAgo.toISOString().split('T')[0];
-
   let count = 0;
-  for (const t of state.trainings) {
-    if (t.date >= since) {
-      const a = t.attendance && t.attendance[playerId];
-      const status = a ? (typeof a === 'string' ? a : a.status || '') : '';
-      if (status === 'yes') count++;
-    }
+  for (const t of getSeasonTrainings()) {
+    const a = t.attendance && t.attendance[playerId];
+    const status = a ? (typeof a === 'string' ? a : a.status || '') : '';
+    if (status === 'yes') count++;
   }
   return count;
 }
@@ -768,6 +797,26 @@ function autoAssignLaundry(matchId) {
   render();
 }
 
+function setMatchRating(matchId, playerId, cat, val) {
+  const m = state.matches.find(x => x.id === matchId);
+  if (!m) return;
+  if (!m.playerRatings) m.playerRatings = {};
+  if (!m.playerRatings[playerId]) m.playerRatings[playerId] = { spiel: 0, zweikampf: 0, verstaendnis: 0 };
+  m.playerRatings[playerId][cat] = val;
+  saveState();
+  render();
+}
+
+function getPlayerMatchAvg(playerId, cat) {
+  const ratings = [];
+  for (const m of getSeasonMatches()) {
+    const r = m.playerRatings && m.playerRatings[playerId];
+    if (r && r[cat] && r[cat] > 0) ratings.push(r[cat]);
+  }
+  if (ratings.length === 0) return 0;
+  return Math.round(ratings.reduce((a,b) => a + b, 0) / ratings.length);
+}
+
 // ─── Kader für Telegram-Umfrage ────────────────────────────
 function toggleKaderPlayer(playerId) {
   matchKaderSelection[playerId] = !matchKaderSelection[playerId];
@@ -1084,22 +1133,24 @@ function renderDashboard() {
   var content = $('#app-content');
   var today = todayStr();
   var totalPlayers = state.players.length;
-  var totalTrainings = state.trainings.length;
-  var totalMatches = state.matches.length;
-  var homeMatches = state.matches.filter(function(m){return m.isHome}).length;
+  var seasonTrainings = getSeasonTrainings();
+  var seasonMatches = getSeasonMatches();
+  var totalTrainings = seasonTrainings.length;
+  var totalMatches = seasonMatches.length;
+  var homeMatches = seasonMatches.filter(function(m){return m.isHome}).length;
   var awayMatches = totalMatches - homeMatches;
-  var upcomingMatches = state.matches.filter(function(m){return m.date >= today}).sort(function(a,b){return a.date.localeCompare(b.date)});
+  var upcomingMatches = seasonMatches.filter(function(m){return m.date >= today}).sort(function(a,b){return a.date.localeCompare(b.date)});
   var nextMatch = upcomingMatches[0];
 
   var recentEvents = [];
-  state.trainings.forEach(function(t){if(t.date < today)recentEvents.push({date:t.date,type:'training',data:t});});
-  state.matches.forEach(function(m){if(m.date < today)recentEvents.push({date:m.date,type:'match',data:m});});
+  seasonTrainings.forEach(function(t){if(t.date < today)recentEvents.push({date:t.date,type:'training',data:t});});
+  seasonMatches.forEach(function(m){if(m.date < today)recentEvents.push({date:m.date,type:'match',data:m});});
   recentEvents.sort(function(a,b){return b.date.localeCompare(a.date)});
   recentEvents = recentEvents.slice(0, 8);
 
   var perPlayerStats = state.players.map(function(p) {
     var yesCount = 0, totalCount = 0, goodCount = 0, behavCount = 0;
-    state.trainings.forEach(function(t) {
+    seasonTrainings.forEach(function(t) {
       var a = t.attendance && t.attendance[p.id];
       if (!a) return;
       var status = typeof a === 'string' ? a : (a.status || '');
@@ -1118,7 +1169,7 @@ function renderDashboard() {
     : 0;
 
   var totalGood = 0, totalBehav = 0;
-  state.trainings.forEach(function(t) {
+  seasonTrainings.forEach(function(t) {
     for (var pid in t.attendance || {}) {
       var a = t.attendance[pid];
       var behav = typeof a === 'object' && a ? (a.behavior || '') : '';
@@ -1130,12 +1181,12 @@ function renderDashboard() {
   var behavPlayers = perPlayerStats.filter(function(p){return p.behavPct > 0}).sort(function(a,b){return b.behavPct - a.behavPct});
 
   var overallCount = 0, overallGood = 0;
-  state.trainings.forEach(function(t) {
+  seasonTrainings.forEach(function(t) {
     if (t.overall) { overallCount++; if (t.overall === 'good' || t.overall === 'ok') overallGood++; }
   });
   var avgOverall = overallCount > 0 ? Math.round(overallGood / overallCount * 100) : 0;
 
-  var lastTraining = state.trainings.filter(function(t){return t.date < today || t.date === today}).sort(function(a,b){return b.date.localeCompare(a.date)})[0];
+  var lastTraining = seasonTrainings.filter(function(t){return t.date < today || t.date === today}).sort(function(a,b){return b.date.localeCompare(a.date)})[0];
   var lastAttended = 0, lastTotal = 0;
   if (lastTraining) {
     for (var pid in lastTraining.attendance || {}) {
@@ -1172,13 +1223,36 @@ function renderDashboard() {
   }
 
   // Spiele der Woche (nur heute & Zukunft)
-  state.matches.forEach(function(m) {
+  seasonMatches.forEach(function(m) {
     if (m.date >= today && m.date >= weekStartStr && m.date <= weekEndStr) {
       weekEvents.push({ date: m.date, type: 'match', data: m });
     }
   });
 
   weekEvents.sort(function(a,b) { return a.date.localeCompare(b.date); });
+
+  // Saison-Vergleich
+  var prevSeason = state.settings.seasons.filter(function(s) { return s !== state.settings.season; }).sort().pop();
+  var prevAtt = 0, prevBehav = 0;
+  if (prevSeason && state.players.length > 0) {
+    var prevP1 = getPlayerAttendancePct(state.players[0].id, prevSeason);
+    if (prevP1 > 0) { // es gibt Daten für letzte Saison
+      var prevAttSum = 0, prevAttCount = 0, prevBehavSum = 0, prevBehavCount = 0;
+      state.players.forEach(function(pl) {
+        var pa = getPlayerAttendancePct(pl.id, prevSeason);
+        if (pa > 0) { prevAttSum += pa; prevAttCount++; }
+        var pb = getPlayerBehaviorPct(pl.id, prevSeason);
+        if (pb > 0) { prevBehavSum += pb; prevBehavCount++; }
+      });
+      prevAtt = prevAttCount > 0 ? Math.round(prevAttSum / prevAttCount) : 0;
+      prevBehav = prevBehavCount > 0 ? Math.round(prevBehavSum / prevBehavCount) : 0;
+    }
+  }
+
+  html.push('<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">');
+  html.push('<span style="font-size:14px;font-weight:600;color:var(--primary);">📅 Saison ' + state.settings.season + '</span>');
+  if (prevAtt > 0) html.push('<span style="font-size:12px;color:var(--text-secondary);">Vorherige: ' + prevAtt + '% / 😊 ' + prevBehav + '%</span>');
+  html.push('</div>');
 
   html.push('<div class="card"><div class="card-title">📅 Diese Woche</div>');
   if (weekEvents.length === 0) {
@@ -1280,6 +1354,9 @@ function renderPlayers() {
     return;
   }
 
+  const seasonTrainings = getSeasonTrainings();
+  const seasonMatches = getSeasonMatches();
+
   content.innerHTML = `
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
       <span style="font-size:16px;font-weight:700;color:var(--primary);">${state.players.length} Spieler</span>
@@ -1288,31 +1365,72 @@ function renderPlayers() {
     <div id="player-list">
       ${state.players.map(p => {
         const ampel = getPlayerAmpel(p.id);
-        let behavTotal = 0, behavGood = 0, attTotal = 0;
-        for (const t of state.trainings) {
-          const a = t.attendance && t.attendance[p.id];
-          const status = a ? (typeof a === 'string' ? a : a.status || '') : '';
-          const behav = a && typeof a === 'object' ? (a.behavior || '') : '';
-          if (status === 'yes' || status === 'late') attTotal++;
-          if (status === 'yes') { behavTotal++; if (behav === 'good') behavGood++; }
-        }
-        const behavPct = behavTotal > 0 ? Math.round(behavGood / behavTotal * 100) : 0;
+        const attPct = getPlayerAttendancePct(p.id);
+        const behavPct = getPlayerBehaviorPct(p.id);
+        const r = p.rating || { fitness: 3, technique: 3, matchPerf: 3 };
+        const matchSpiel = getPlayerMatchAvg(p.id, 'spiel');
+        const matchZk = getPlayerMatchAvg(p.id, 'zweikampf');
+        const matchSv = getPlayerMatchAvg(p.id, 'verstaendnis');
         const ampelLabel = ampel.label;
-        const ampelEmoji = ampel.level === 'green' ? '🟢' : ampel.level === 'yellow' ? '🟡' : '🔴';
+        const isExpanded = playerExpanded[p.id];
+        const matchCount = seasonMatches.filter(m => m.playerRatings && m.playerRatings[p.id] && m.playerRatings[p.id].spiel > 0).length;
+        const playerMatches = seasonMatches.filter(m => m.poll && m.poll[p.id] === 'yes').sort((a,b) => b.date.localeCompare(a.date));
+        const playerTrainings = seasonTrainings.filter(t => t.attendance && t.attendance[p.id]).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 15);
         return `
-          <div class="player-card" onclick="editPlayer(${p.id})" style="position:relative;">
-            <div class="player-avatar">${p.name.charAt(0)}</div>
-            <div class="player-info">
-              <div class="player-name">${escHtml(p.name)}</div>
-              <div class="player-number">${p.number ? '#' + p.number : ''} · ${attTotal}/${state.trainings.length} Trainings · 😊 ${behavPct}%</div>
-              <div style="font-size:12px;margin-top:2px;"><span class="ampel-dot ${ampel.level}" style="display:inline-block;width:10px;height:10px;vertical-align:middle;"></span> ${ampelLabel}</div>
+          <div style="margin-bottom:8px;">
+            <div class="player-card" style="cursor:pointer;position:relative;" onclick="togglePlayerStats(${p.id})">
+              <div class="player-avatar">${p.name.charAt(0)}</div>
+              <div class="player-info">
+                <div class="player-name">${escHtml(p.name)}</div>
+                <div class="player-number">${p.number ? '#' + p.number : ''} · ${attPct}% · 😊 ${behavPct}% · 🏃${r.fitness}⚽${r.technique}</div>
+                <div style="font-size:12px;margin-top:2px;"><span class="ampel-dot ${ampel.level}" style="display:inline-block;width:10px;height:10px;vertical-align:middle;"></span> ${ampelLabel}</div>
+              </div>
+              <div style="position:absolute;top:12px;right:12px;font-size:12px;color:var(--text-secondary);">${isExpanded ? '▲' : '▼'}</div>
             </div>
-            <div class="ampel-dot ${ampel.level}" style="position:absolute;top:12px;right:12px;"></div>
+            ${isExpanded ? `
+              <div style="background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px;padding:12px;font-size:13px;">
+                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">⚽ Spiel ⌀ ${matchSpiel > 0 ? matchSpiel : '-'}</span>
+                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">💪 Zweikampf ⌀ ${matchZk > 0 ? matchZk : '-'}</span>
+                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">🧠 Verständnis ⌀ ${matchSv > 0 ? matchSv : '-'}</span>
+                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">🏃 Fitness ${r.fitness}</span>
+                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">⚽ Technik ${r.technique}</span>
+                </div>
+                ${playerTrainings.length > 0 ? `
+                  <div style="font-weight:600;margin-bottom:4px;">⚽ Training (${seasonTrainings.length} gesamt)</div>
+                  ${playerTrainings.map(t => {
+                    const a = t.attendance[p.id];
+                    const status = a ? (a.status || '') : '';
+                    const behav = a && a.behavior ? a.behavior : '';
+                    const statusEmoji = status === 'yes' ? '✅' : status === 'late' ? '⏰' : '❌';
+                    const behavEmoji = behav === 'good' ? '😊' : behav === 'ok' ? '🙂' : behav === 'bad' ? '☹️' : '';
+                    return '<div style="display:flex;gap:6px;padding:3px 0;font-size:12px;color:var(--text-secondary);"><span>' + formatDateLong(t.date).split(',')[0] + '</span><span>' + statusEmoji + '</span>' + (behavEmoji ? '<span>' + behavEmoji + '</span>' : '') + '</div>';
+                  }).join('')}
+                ` : '<div style="font-size:12px;color:var(--text-secondary);">Keine Trainings in dieser Saison</div>'}
+                ${playerMatches.length > 0 ? `
+                  <div style="font-weight:600;margin-top:10px;margin-bottom:4px;">📊 Spiele (${matchCount} bewertet)</div>
+                  ${playerMatches.map(m => {
+                    const r2 = m.playerRatings && m.playerRatings[p.id];
+                    const ratingsStr = r2 ? '⚽' + (r2.spiel||'-') + ' 💪' + (r2.zweikampf||'-') + ' 🧠' + (r2.verstaendnis||'-') : 'keine Bewertung';
+                    return '<div style="display:flex;gap:6px;padding:3px 0;font-size:12px;color:var(--text-secondary);"><span>' + formatDate(m.date) + '</span><span>vs ' + escHtml(m.opponent) + '</span><span>' + ratingsStr + '</span></div>';
+                  }).join('')}
+                ` : ''}
+                <div style="display:flex;gap:8px;margin-top:10px;">
+                  <button class="btn btn-small btn-primary" onclick="event.stopPropagation();editPlayer(${p.id})">✏️ Bearbeiten</button>
+                  <button class="btn btn-small btn-danger" onclick="event.stopPropagation();deletePlayer(${p.id})">🗑️ Löschen</button>
+                </div>
+              </div>
+            ` : ''}
           </div>
         `;
       }).join('')}
     </div>
   `;
+}
+
+function togglePlayerStats(id) {
+  playerExpanded[id] = !playerExpanded[id];
+  render();
 }
 
 function renderTraining() {
@@ -1325,11 +1443,11 @@ function renderTraining() {
   }
 
   if (!state.trainingActive || state.trainingDate !== today) {
-    const recentTrainings = state.trainings.filter(t => t.date < today).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 10);
+    const recentTrainings = getSeasonTrainings().filter(t => t.date < today).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 10);
 
     // ─── Kader für nächstes Spiel ─────────────────────────
     const todayDate = todayStr();
-    const upcomingMatches = state.matches.filter(m => m.date >= todayDate).sort((a,b) => a.date.localeCompare(b.date));
+    const upcomingMatches = getSeasonMatches().filter(m => m.date >= todayDate).sort((a,b) => a.date.localeCompare(b.date));
     const nextMatch = upcomingMatches[0];
 
     let kaderHtml = '';
@@ -1341,14 +1459,17 @@ function renderTraining() {
         const attPct = getPlayerAttendancePct(p.id);
         const behavPct = getPlayerBehaviorPct(p.id);
         const rating = p.rating || { fitness: 3, technique: 3, matchPerf: 3 };
-        const ratingSum = rating.fitness + rating.technique + rating.matchPerf;
+        const matchSpiel = getPlayerMatchAvg(p.id, 'spiel');
+        const matchZk = getPlayerMatchAvg(p.id, 'zweikampf');
+        const matchSv = getPlayerMatchAvg(p.id, 'verstaendnis');
+        const ratingSum = rating.fitness + rating.technique + matchSpiel + matchZk + matchSv;
         const weekAtt = weekTrainings.map(t => {
           const a = t.attendance && t.attendance[p.id];
           const status = a ? (typeof a === 'string' ? a : (a.status || '')) : '';
           return status === 'yes' || status === 'late' ? '✅' : '❌';
         });
         const weekText = weekTrainingDates.map((d, i) => formatDate(d).split(',')[0] + weekAtt[i]).join(' ');
-        return { id: p.id, name: p.name, attPct, behavPct, rating, weekText, sortKey: -(attPct * 10000 + behavPct * 100 + ratingSum) };
+        return { id: p.id, name: p.name, attPct, behavPct, rating, matchSpiel, matchZk, matchSv, weekText, sortKey: -(attPct * 10000 + behavPct * 100 + ratingSum) };
       });
       playerStats.sort((a, b) => a.sortKey - b.sortKey);
 
@@ -1367,7 +1488,7 @@ function renderTraining() {
         <div class="card">
           <div class="card-title">📅 Nächstes Spiel: vs ${escHtml(nextMatch.opponent)} (${formatDateLong(nextMatch.date)})</div>
           <div style="font-size:13px;color:var(--text-secondary);margin-bottom:8px;">
-            Kader-Eignung · sortiert nach Beteiligung + Verhalten
+            Kader-Eignung · Saison ${state.settings.season} · sortiert nach Beteiligung + Verhalten
           </div>
           ${playerStats.map(ps => {
             const checked = matchKaderSelection[ps.id] ? 'checked' : '';
@@ -1382,7 +1503,10 @@ function renderTraining() {
                   <span style="width:14px;text-align:center;">😊</span>
                   <span style="width:30px;text-align:right;">${ps.behavPct}%</span>
                 </span>
-                <span style="font-size:10px;color:var(--text-secondary);flex-shrink:0;white-space:nowrap;letter-spacing:-0.5px;">🏃${ps.rating.fitness}⚽${ps.rating.technique}📊${ps.rating.matchPerf}</span>
+                <span style="font-size:10px;color:var(--text-secondary);flex-shrink:0;white-space:nowrap;letter-spacing:-0.5px;">
+                  🏃${ps.rating.fitness}⚽${ps.rating.technique}
+                  ${ps.matchSpiel > 0 ? `⚽${ps.matchSpiel}💪${ps.matchZk}🧠${ps.matchSv}` : '⚽-💪-🧠-'}
+                </span>
                 <span style="font-size:11px;color:var(--text-secondary);flex-shrink:0;white-space:nowrap;">· ${ps.weekText}</span>
               </div>
             `;
@@ -1545,7 +1669,7 @@ function renderMatchday() {
   const greenCount = playerStats.filter(p => p.ampel.level === 'green').length;
   const yellowCount = playerStats.filter(p => p.ampel.level === 'yellow').length;
   const redCount = playerStats.filter(p => p.ampel.level === 'red').length;
-  const allMatches = [...state.matches].sort((a,b) => a.date.localeCompare(b.date));
+  const allMatches = [...getSeasonMatches()].sort((a,b) => a.date.localeCompare(b.date));
 
   if (selectedMatchId) {
     renderMatchDetail();
@@ -1640,6 +1764,22 @@ function renderMatchDetail() {
     '<div style="display:flex;gap:12px;justify-content:center;font-size:14px;margin-top:12px;flex-wrap:wrap;">',
     '<span>✅ ' + pollYes + '</span><span>❓ ' + pollMaybe + '</span><span>❌ ' + pollNo + '</span>',
     '</div></div></div>',
+    '<div class="card"><div class="card-title" onclick="toggleCollapse(\'ratings\')" style="cursor:pointer;">📊 Match-Bewertung <span style="margin-left:auto;font-size:12px;color:var(--text-secondary);">' + (uiCollapsed.ratings ? '▸' : '▾') + '</span></div>',
+    '<div style="display:' + (uiCollapsed.ratings ? 'none' : 'block') + '">',
+    state.players.filter(function(p) { return m.poll && m.poll[p.id] === 'yes'; }).map(function(p) {
+      var r = m.playerRatings && m.playerRatings[p.id];
+      var spiel = r ? r.spiel : 0;
+      var zk = r ? r.zweikampf : 0;
+      var sv = r ? r.verstaendnis : 0;
+      function starHtml(cat, val) {
+        return [1,2,3,4,5].map(function(i) {
+          var s = i <= val ? '⭐' : '☆';
+          return '<span style="cursor:pointer;font-size:16px;" onclick="setMatchRating(' + m.id + ',' + p.id + ",'" + cat + "'," + i + ')">' + s + '</span>';
+        }).join('');
+      }
+      return '<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;"><span style="font-weight:600;width:80px;">' + escHtml(p.name) + '</span><span style="font-size:11px;color:var(--text-secondary);width:70px;">⚽ Spiel</span><span>' + starHtml('spiel', spiel) + '</span><span style="font-size:11px;color:var(--text-secondary);width:80px;">💪 Zweikampf</span><span>' + starHtml('zweikampf', zk) + '</span><span style="font-size:11px;color:var(--text-secondary);width:80px;">🧠 Verständnis</span><span>' + starHtml('verstaendnis', sv) + '</span></div>';
+    }).join(''),
+    '</div></div>',
     '<div style="margin-bottom:16px;"><div class="card-title" onclick="toggleCollapse(\'helpers\')" style="cursor:pointer;">🔧 Helfer-Aufgaben <span style="margin-left:auto;font-size:12px;color:var(--text-secondary);">' + (uiCollapsed.helpers ? '▸' : '▾') + '</span></div><div style="display:' + (uiCollapsed.helpers ? 'none' : 'block') + '">' + renderMatchTasks(m) + '</div></div>'
   ].join('');
 }
@@ -1722,10 +1862,10 @@ function renderCalendar() {
           const day = i + 1;
           const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
           const isScheduled = scheduledTrainings.some(t => t.date === dateStr);
-          const isMatch = state.matches.some(m => m.date === dateStr);
+          const isMatch = getSeasonMatches().some(m => m.date === dateStr);
           const isExcused = isExceptionDate(dateStr);
           const isToday = dateStr === today;
-          const match = state.matches.find(m => m.date === dateStr);
+          const match = getSeasonMatches().find(m => m.date === dateStr);
           let cls = 'calendar-day';
           let title = '';
           let label = '';
@@ -1822,6 +1962,22 @@ function renderCalendar() {
   content.innerHTML = html;
 }
 
+function switchSeason(season) {
+  state.settings.season = season;
+  saveState();
+  render();
+}
+
+function addNewSeason() {
+  const lastSeason = state.settings.seasons.slice().sort().pop() || '26/27';
+  const parts = lastSeason.split('/').map(Number);
+  const nextSeason = (parts[0] + 1) + '/' + (parts[1] + 1);
+  if (!state.settings.seasons.includes(nextSeason)) state.settings.seasons.push(nextSeason);
+  state.settings.season = nextSeason;
+  saveState();
+  render();
+}
+
 function toggleTrainingDay(day) {
   const days = state.settings.trainingDays;
   const idx = days.indexOf(day);
@@ -1883,6 +2039,7 @@ function renderHistory() {
   const events = [];
 
   state.trainings.forEach(t => {
+    if (historySeasonFilter !== '__all__' && (t.season || '25/26') !== historySeasonFilter) return;
     let total = 0, goods = 0, oks = 0, bads = 0;
     for (const pid in t.attendance || {}) {
       const a = t.attendance[pid];
@@ -1906,6 +2063,7 @@ function renderHistory() {
   });
 
   state.matches.forEach(m => {
+    if (historySeasonFilter !== '__all__' && (m.season || '25/26') !== historySeasonFilter) return;
     const pollYes = m.poll ? Object.values(m.poll).filter(v => v === 'yes').length : 0;
     const pollNo = m.poll ? Object.values(m.poll).filter(v => v === 'no').length : 0;
     const pollMaybe = m.poll ? Object.values(m.poll).filter(v => v === 'maybe').length : 0;
@@ -1928,6 +2086,14 @@ function renderHistory() {
   let html = '';
 
   const noData = events.length === 0;
+
+  html += '<div style="margin-bottom:8px;">';
+  html += '<select id="history-season" onchange="historySeasonFilter=this.value;renderHistory()" style="font-size:14px;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);width:100%;">';
+  (state.settings.seasons || ['25/26','26/27']).forEach(function(s) {
+    html += '<option value="' + s + '" ' + (s === historySeasonFilter ? 'selected' : '') + '>' + s + '</option>';
+  });
+  html += '<option value="__all__" ' + (historySeasonFilter === '__all__' ? 'selected' : '') + '>Alle Saisons</option>';
+  html += '</select></div>';
 
   const searchVal = ($('#history-search')?.value || '').toLowerCase();
   html += `<input type="text" id="history-search" placeholder="🔍 Spieler suchen..." value="${escHtml(searchVal)}" oninput="renderHistory()" style="width:100%;padding:12px;border:2px solid var(--border);border-radius:8px;font-size:16px;margin-bottom:16px;outline:none;" onfocus="this.style.borderColor='var(--primary)'" onblur="this.style.borderColor='var(--border)'">`;
@@ -2080,6 +2246,22 @@ function renderSettings() {
           }).join('')}
         `}
         <button class="btn btn-small btn-secondary" style="margin-top:8px;" onclick="addExceptionDate()">+ Ausnahmetage hinzufügen</button>
+      </div>
+
+      <div class="settings-group">
+        <h3>📅 Saison</h3>
+        <div class="settings-row">
+          <label>Aktuelle Saison</label>
+          <select onchange="switchSeason(this.value)" style="font-size:14px;padding:6px;border-radius:8px;border:1px solid var(--border);background:var(--bg);color:var(--text);">
+            ${(state.settings.seasons || ['25/26','26/27']).map(s =>
+              `<option value="${s}" ${s === state.settings.season ? 'selected' : ''}>${s}</option>`
+            ).join('')}
+          </select>
+        </div>
+        <button class="btn btn-small btn-secondary" style="margin-top:4px;" onclick="addNewSeason()">+ Neue Saison anlegen</button>
+        ${!state.settings.seasons.includes('24/25') ? `
+          <button class="btn btn-small btn-secondary" style="margin-top:4px;margin-left:8px;" onclick="seedSeason24_25()">📂 Simulierte Saison 24/25 laden</button>
+        ` : ''}
       </div>
 
       <div class="settings-group">
