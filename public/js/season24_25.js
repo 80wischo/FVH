@@ -115,11 +115,20 @@
     const matches = [];
     let pidIdx = 0;
 
-    // ─── Spieler initial anlegen ──────────────────────────
-    if (state.players.length === 0) {
-      for (let i = 0; i < PLAYER_IDS.length; i++) {
+    // ─── Spieler per Name matchen oder anlegen ────────────
+    const nameToId = {};
+    let nextId = Math.max(...state.players.map(p => p.id), 20000) + 1;
+    for (let i = 0; i < PLAYER_NAMES.length; i++) {
+      const existing = state.players.find(p => p.name === PLAYER_NAMES[i]);
+      if (existing) {
+        nameToId[PLAYER_NAMES[i]] = existing.id;
         const rp = RATING_PROFILES[PLAYER_NAMES[i]];
-        state.players.push({ id: PLAYER_IDS[i], name: PLAYER_NAMES[i], number: i+1, active: true, rating: { fitness: rp[0], technique: rp[1], matchPerf: 3 } });
+        if (!existing.rating) existing.rating = { fitness: rp[0], technique: rp[1], matchPerf: 3 };
+      } else {
+        const rp = RATING_PROFILES[PLAYER_NAMES[i]];
+        const newId = nextId++;
+        state.players.push({ id: newId, name: PLAYER_NAMES[i], number: i+1, active: true, rating: { fitness: rp[0], technique: rp[1], matchPerf: 3 } });
+        nameToId[PLAYER_NAMES[i]] = newId;
       }
     }
     if (!state.settings.seasons.includes('24/25')) state.settings.seasons.push('24/25');
@@ -140,11 +149,12 @@
       const dateStr = formatDate(d);
       const attendance = {};
       for (let i = 0; i < PLAYER_NAMES.length; i++) {
+        const pid = nameToId[PLAYER_NAMES[i]];
         const status = genAttendance(PLAYER_NAMES[i]);
         if (status === 'yes' || status === 'late') {
-          attendance[PLAYER_IDS[i]] = { status, behavior: genBehavior(PLAYER_NAMES[i]) };
+          attendance[pid] = { status, behavior: genBehavior(PLAYER_NAMES[i]) };
         } else {
-          attendance[PLAYER_IDS[i]] = { status, behavior: '' };
+          attendance[pid] = { status, behavior: '' };
         }
       }
       const goodCount = Object.values(attendance).filter(a => a.behavior === 'good').length;
@@ -180,13 +190,13 @@
       const poll = {};
       const playerRatings = {};
       for (let i = 0; i < PLAYER_NAMES.length; i++) {
+        const pid = nameToId[PLAYER_NAMES[i]];
         const r = rand();
-        // bessere Spieler sagen öfter zu
         const zusageWkt = i < 3 ? 0.95 : i < 7 ? 0.80 : 0.60;
         const vote = r < zusageWkt ? 'yes' : r < zusageWkt + 0.10 ? 'maybe' : 'no';
-        poll[PLAYER_IDS[i]] = vote;
+        poll[pid] = vote;
         if (vote === 'yes') {
-          playerRatings[PLAYER_IDS[i]] = genMatchRating(PLAYER_NAMES[i]);
+          playerRatings[pid] = genMatchRating(PLAYER_NAMES[i]);
         }
       }
 
