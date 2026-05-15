@@ -210,6 +210,69 @@ app.delete('/api/poll/clear/:matchId', (req, res) => {
   res.json({ success: true });
 });
 
+// ─── Wetter-Sprüche ─────────────────────────────────────────
+const BOT_QUOTES = [
+  'Schönwetter-Spieler gibt\'s im Park. FVH-Spieler kommen auch bei Regen.',
+  'Training fällt nicht aus – nur die Ausreden werden leichter.',
+  'Die Sonne scheint nur für Zuschauer. Spieler schwitzen.',
+  'Bei dem Wetter bleiben die Schwachen zu Hause. Du bist hier.',
+  'Es gibt kein schlechtes Wetter – nur falsche Kleidung.',
+  'Regen macht dich nicht nass. Er wäscht die Ausreden weg.',
+  'Bei Regen wird man nicht nass – man wird härter.',
+  'Die besten Spiele werden im Regen entschieden.',
+  'Kälte ist eine Frage der Einstellung. Und der zweiten Lage.',
+  'Frieren kann ich auch zu Hause. Aber gewinnen nur hier.',
+  'Ball ist rund, Platz ist nass, Füße sind kalt – Augen sind heiß.',
+  'Im November werden keine Titel gewonnen. Sondern im März dankbar.',
+  'Das Wetter ist keine Einladung – es ist eine Ausrede.',
+  'Andere Vereine haben Wetter. Wir haben Training.',
+  'Der FVH macht kein Schlecht-Wetter-Training. Sondern Hart-im-Nehmen-Training.',
+  'Regen? Solange der Ball rollt, ist alles gut.'
+];
+
+// Trainingstage-Konfiguration speichern/laden
+const TRAININGDAYS_FILE = path.join(__dirname, '.trainingdays');
+
+function loadTrainingDays() {
+  try {
+    if (fs.existsSync(TRAININGDAYS_FILE)) {
+      return JSON.parse(fs.readFileSync(TRAININGDAYS_FILE, 'utf8'));
+    }
+  } catch (e) {}
+  return ['Di', 'Do'];
+}
+
+function saveTrainingDays(days) {
+  try {
+    fs.writeFileSync(TRAININGDAYS_FILE, JSON.stringify(days));
+  } catch (e) {}
+}
+
+// Bot-Quote senden (per Webhook von cron)
+app.post('/api/bot/quote', (req, res) => {
+  if (!bot || !botReady) return res.status(503).json({ error: 'Bot nicht verfügbar' });
+  const groupId = getTelegramGroupId();
+  if (!groupId) return res.status(400).json({ error: 'Keine Gruppe konfiguriert' });
+
+  const quote = req.body.text || BOT_QUOTES[Math.floor(Math.random() * BOT_QUOTES.length)];
+  bot.sendMessage(groupId, `💬 *FVH-Spruch des Tages:*\n\n_${quote}_`, { parse_mode: 'Markdown' })
+    .then(() => res.json({ success: true }))
+    .catch(err => res.status(500).json({ error: err.message }));
+});
+
+// Trainingstage setzen (vom Frontend)
+app.post('/api/settings/trainingdays', (req, res) => {
+  const { days } = req.body;
+  if (!Array.isArray(days)) return res.status(400).json({ error: 'days muss ein Array sein' });
+  saveTrainingDays(days);
+  res.json({ success: true });
+});
+
+// Trainingstage abrufen
+app.get('/api/settings/trainingdays', (req, res) => {
+  res.json({ days: loadTrainingDays() });
+});
+
 // ─── Frontend Catch-all ────────────────────────────────────
 app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));

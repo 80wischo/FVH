@@ -614,6 +614,7 @@ function getWeather() {
         alertHtml = '<div class="weather-alert ok">✅ Keine Warnung – Training kann stattfinden</div>';
       }
 
+      const quote = getWeatherQuote(code);
       el.innerHTML = `
         <div style="display:flex;align-items:center;gap:16px;">
           <span style="font-size:44px;">${weatherEmoji}</span>
@@ -623,11 +624,42 @@ function getWeather() {
           </div>
         </div>
         ${alertHtml}
+        <div style="margin-top:10px;padding:10px;background:var(--card-bg);border-radius:8px;font-size:13px;font-style:italic;color:var(--text-secondary);text-align:center;">💬 ${quote}</div>
       `;
     })
     .catch(() => {
       el.innerHTML = '<div style="color:var(--text-secondary);">Wetter nicht verfügbar</div>';
     });
+}
+
+const WEATHER_QUOTES = [
+  { cond: 'sun', text: 'Schönwetter-Spieler gibt\'s im Park. FVH-Spieler kommen auch bei Regen.' },
+  { cond: 'sun', text: 'Training fällt nicht aus – nur die Ausreden werden leichter.' },
+  { cond: 'sun', text: 'Die Sonne scheint nur für Zuschauer. Spieler schwitzen.' },
+  { cond: 'sun', text: 'Bei dem Wetter bleiben die Schwachen zu Hause. Du bist hier.' },
+  { cond: 'rain', text: 'Es gibt kein schlechtes Wetter – nur falsche Kleidung.' },
+  { cond: 'rain', text: 'Regen macht dich nicht nass. Er wäscht die Ausreden weg.' },
+  { cond: 'rain', text: 'Bei Regen wird man nicht nass – man wird härter.' },
+  { cond: 'rain', text: 'Die besten Spiele werden im Regen entschieden.' },
+  { cond: 'cold', text: 'Kälte ist eine Frage der Einstellung. Und der zweiten Lage.' },
+  { cond: 'cold', text: 'Frieren kann ich auch zu Hause. Aber gewinnen nur hier.' },
+  { cond: 'cold', text: 'Ball ist rund, Platz ist nass, Füße sind kalt – Augen sind heiß.' },
+  { cond: 'cold', text: 'Im November werden keine Titel gewonnen. Sondern im März dankbar.' },
+  { cond: 'any', text: 'Das Wetter ist keine Einladung – es ist eine Ausrede.' },
+  { cond: 'any', text: 'Andere Vereine haben Wetter. Wir haben Training.' },
+  { cond: 'any', text: 'Der FVH macht kein Schlecht-Wetter-Training. Sondern Hart-im-Nehmen-Training.' },
+  { cond: 'any', text: 'Regen? Solange der Ball rollt, ist alles gut.' }
+];
+
+function getWeatherQuote(code) {
+  let cond = 'any';
+  if (code <= 3) cond = 'sun';
+  else if (code >= 95) cond = 'rain';
+  else if (code >= 80) cond = 'rain';
+  else if (code >= 55) cond = 'rain';
+  else if (code >= 51) cond = 'rain';
+  const pool = WEATHER_QUOTES.filter(q => q.cond === cond || q.cond === 'any');
+  return pool[Math.floor(Math.random() * pool.length)].text;
 }
 
 function getWeatherEmoji(code) {
@@ -1282,35 +1314,6 @@ function renderDashboard() {
   }
   html.push('</div>');
 
-  html.push('<div class="card"><div class="card-title">📊 Übersicht</div>');
-  html.push('<div class="stats-row" style="padding-left:26px;">');
-
-  html.push('<div style="padding:8px 0;">');
-  html.push('<div style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:6px;">Anwesenheit</div>');
-  html.push('<div style="font-size:40px;font-weight:800;color:var(--text);line-height:1;margin-bottom:10px;">' + avgAttendance + '%</div>');
-  html.push('<div style="display:flex;flex-direction:column;gap:2px;">');
-  perPlayerStats.forEach(function(p, i) {
-    var medal = i < 3 ? ['🥇','🥈','🥉'][i] : '';
-    var nameColor = i === 0 ? '#D4A017' : i === 1 ? '#8C8C8C' : i === 2 ? '#CD7F32' : p.pct < 55 ? '#F44336' : p.pct < 75 ? '#FF9800' : '';
-    var warn = p.pct < 75 ? ' ⚠️' : '';
-    html.push('<div style="font-size:13px;' + (nameColor ? 'color:' + nameColor + ';' : '') + '"><span style="display:inline-block;width:28px;margin-left:-28px;text-align:right;">' + medal + '</span>' + (i+1) + '.' + escHtml(p.name) + ' ' + p.pct + '%' + warn + '</div>');
-  });
-  html.push('</div></div>');
-
-  html.push('<div style="padding:8px 0;">');
-  html.push('<div style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:6px;">Verhalten</div>');
-  html.push('<div style="font-size:40px;font-weight:800;color:var(--text);line-height:1;margin-bottom:10px;">' + overallBehav + '%</div>');
-  html.push('<div style="display:flex;flex-direction:column;gap:2px;">');
-  behavPlayers.forEach(function(p, i) {
-    var medal = i < 3 ? ['🥇','🥈','🥉'][i] : '';
-    var nameColor = i === 0 ? '#D4A017' : i === 1 ? '#8C8C8C' : i === 2 ? '#CD7F32' : p.behavPct < 55 ? '#F44336' : p.behavPct < 75 ? '#FF9800' : '';
-    var warn = p.behavPct < 75 ? ' ⚠️' : '';
-    html.push('<div style="font-size:13px;' + (nameColor ? 'color:' + nameColor + ';' : '') + '"><span style="display:inline-block;width:28px;margin-left:-28px;text-align:right;">' + medal + '</span>' + (i+1) + '.' + escHtml(p.name) + ' ' + p.behavPct + '%' + warn + '</div>');
-  });
-  html.push('</div></div>');
-
-  html.push('</div></div>');
-
   // ─── Saison-Bilanz ───────────────────────────────────────
   var played = seasonMatches.filter(function(m){ return m.homeGoals !== null && m.awayGoals !== null; });
   var wins = played.filter(function(m){ return (m.isHome && m.homeGoals > m.awayGoals) || (!m.isHome && m.awayGoals > m.homeGoals); });
@@ -1326,8 +1329,54 @@ function renderDashboard() {
     html.push('</div></div>');
   }
 
+  html.push('<div class="card"><div class="card-title">📊 Übersicht</div>');
+  html.push('<div style="display:flex;gap:12px;">');
+
+  // Linke Spalte: Anwesenheit
+  html.push('<div style="flex:1;min-width:0;">');
+  html.push('<div style="font-size:15px;font-weight:700;color:var(--primary);text-align:center;margin-bottom:6px;">Anwesenheit</div>');
+  html.push('<div style="font-size:32px;font-weight:800;color:var(--text);text-align:center;line-height:1;margin-bottom:8px;">' + avgAttendance + '%</div>');
+  html.push('<div style="display:flex;flex-direction:column;gap:1px;">');
+  perPlayerStats.forEach(function(p, i) {
+    var medal = i < 3 ? ['🥇','🥈','🥉'][i] : '';
+    var ampColor = p.pct >= 75 ? '🟢' : p.pct >= 55 ? '🟡' : '🔴';
+    var nameColor = i === 0 ? '#D4A017' : i === 1 ? '#8C8C8C' : i === 2 ? '#CD7F32' : '';
+    var num = (i+1) + '.';
+    html.push('<div style="font-size:12px;' + (nameColor ? 'color:' + nameColor + ';' : '') + 'display:flex;align-items:center;gap:2px;">');
+    html.push('<span style="width:22px;text-align:right;flex-shrink:0;">' + medal + '</span>');
+    html.push('<span style="width:24px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;">' + num + '</span>');
+    html.push('<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(p.name) + '</span>');
+    html.push('<span style="font-weight:600;flex-shrink:0;font-variant-numeric:tabular-nums;">' + p.pct + '%</span>');
+    html.push('<span style="flex-shrink:0;">' + ampColor + '</span>');
+    html.push('</div>');
+  });
+  html.push('</div></div>');
+
+  // Rechte Spalte: Verhalten
+  html.push('<div style="flex:1;min-width:0;">');
+  html.push('<div style="font-size:15px;font-weight:700;color:var(--primary);text-align:center;margin-bottom:6px;">Verhalten</div>');
+  html.push('<div style="font-size:32px;font-weight:800;color:var(--text);text-align:center;line-height:1;margin-bottom:8px;">' + overallBehav + '%</div>');
+  html.push('<div style="display:flex;flex-direction:column;gap:1px;">');
+  behavPlayers.forEach(function(p, i) {
+    var medal = i < 3 ? ['🥇','🥈','🥉'][i] : '';
+    var ampColor = p.behavPct >= 75 ? '🟢' : p.behavPct >= 55 ? '🟡' : '🔴';
+    var nameColor = i === 0 ? '#D4A017' : i === 1 ? '#8C8C8C' : i === 2 ? '#CD7F32' : '';
+    var num = (i+1) + '.';
+    html.push('<div style="font-size:12px;' + (nameColor ? 'color:' + nameColor + ';' : '') + 'display:flex;align-items:center;gap:2px;">');
+    html.push('<span style="width:22px;text-align:right;flex-shrink:0;">' + medal + '</span>');
+    html.push('<span style="width:24px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;">' + num + '</span>');
+    html.push('<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(p.name) + '</span>');
+    html.push('<span style="font-weight:600;flex-shrink:0;font-variant-numeric:tabular-nums;">' + p.behavPct + '%</span>');
+    html.push('<span style="flex-shrink:0;">' + ampColor + '</span>');
+    html.push('</div>');
+  });
+  html.push('</div></div>');
+
+  html.push('</div></div>');
+
   if (recentEvents.length > 0) {
-    html.push('<div class="card"><div class="card-title">📋 Letzte Aktivitäten</div>');
+    html.push('<div class="card"><div class="card-title" onclick="toggleCollapse(\'activities\')" style="cursor:pointer;">📋 Letzte Aktivitäten <span style="margin-left:auto;font-size:12px;color:var(--text-secondary);">' + (uiCollapsed.activities ? '▸' : '▾') + '</span></div>');
+    html.push('<div style="display:' + (uiCollapsed.activities ? 'none' : 'block') + '">');
     recentEvents.forEach(function(e) {
       if (e.type === 'training') {
         var cnt = 0;
@@ -1349,7 +1398,7 @@ function renderDashboard() {
         html.push('</div>');
       }
     });
-    html.push('</div>');
+    html.push('</div></div>');
   }
 
   html.push('<div class="card"><div class="card-title">🌤️ Wetter am Platz</div><div id="weather-content" class="weather-card"><div class="loading">Wetter wird geladen...</div></div></div>');
@@ -2028,6 +2077,9 @@ function toggleTrainingDay(day) {
   days.sort((a,b) => 'Mo Di Mi Do Fr Sa So'.indexOf(a) - 'Mo Di Mi Do Fr Sa So'.indexOf(b));
   saveState();
   render();
+  fetch('http://localhost:3000/api/settings/trainingdays', {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days })
+  }).catch(() => {});
 }
 
 function addExceptionDate() {
