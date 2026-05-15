@@ -9,7 +9,6 @@ const DEFAULT_STATE = {
     trainingTimeEnd: '18:30',
     trainingLocation: 'Sportplatz FVH',
     trainingExceptions: [],
-    trainingThreshold: 3,
     useWeather: true,
     season: '26/27',
     seasons: ['25/26', '26/27']
@@ -254,24 +253,6 @@ function getScheduledTrainingsInMonth(year, month) {
     }
   }
   return result;
-}
-
-function getTrainingCount(playerId) {
-  let count = 0;
-  for (const t of getSeasonTrainings()) {
-    const a = t.attendance && t.attendance[playerId];
-    const status = a ? (typeof a === 'string' ? a : a.status || '') : '';
-    if (status === 'yes') count++;
-  }
-  return count;
-}
-
-function getPlayerAmpel(playerId) {
-  const count = getTrainingCount(playerId);
-  const threshold = state.settings.trainingThreshold || 3;
-  if (count >= threshold) return { level: 'green', count, label: 'Spielberechtigt' };
-  if (count >= threshold - 1) return { level: 'yellow', count, label: 'Knapp' };
-  return { level: 'red', count, label: 'Nicht spielberechtigt' };
 }
 
 function showModal(html) {
@@ -614,7 +595,7 @@ function getWeather() {
         alertHtml = '<div class="weather-alert ok">✅ Keine Warnung – Training kann stattfinden</div>';
       }
 
-      const quote = getWeatherQuote(code);
+      const quote = getDailyQuote(temp, code);
       el.innerHTML = `
         <div style="display:flex;align-items:center;gap:16px;">
           <span style="font-size:44px;">${weatherEmoji}</span>
@@ -632,34 +613,87 @@ function getWeather() {
     });
 }
 
-const WEATHER_QUOTES = [
-  { cond: 'sun', text: 'Schönwetter-Spieler gibt\'s im Park. FVH-Spieler kommen auch bei Regen.' },
-  { cond: 'sun', text: 'Training fällt nicht aus – nur die Ausreden werden leichter.' },
-  { cond: 'sun', text: 'Die Sonne scheint nur für Zuschauer. Spieler schwitzen.' },
-  { cond: 'sun', text: 'Bei dem Wetter bleiben die Schwachen zu Hause. Du bist hier.' },
-  { cond: 'rain', text: 'Es gibt kein schlechtes Wetter – nur falsche Kleidung.' },
-  { cond: 'rain', text: 'Regen macht dich nicht nass. Er wäscht die Ausreden weg.' },
-  { cond: 'rain', text: 'Bei Regen wird man nicht nass – man wird härter.' },
-  { cond: 'rain', text: 'Die besten Spiele werden im Regen entschieden.' },
-  { cond: 'cold', text: 'Kälte ist eine Frage der Einstellung. Und der zweiten Lage.' },
-  { cond: 'cold', text: 'Frieren kann ich auch zu Hause. Aber gewinnen nur hier.' },
-  { cond: 'cold', text: 'Ball ist rund, Platz ist nass, Füße sind kalt – Augen sind heiß.' },
-  { cond: 'cold', text: 'Im November werden keine Titel gewonnen. Sondern im März dankbar.' },
-  { cond: 'any', text: 'Das Wetter ist keine Einladung – es ist eine Ausrede.' },
-  { cond: 'any', text: 'Andere Vereine haben Wetter. Wir haben Training.' },
-  { cond: 'any', text: 'Der FVH macht kein Schlecht-Wetter-Training. Sondern Hart-im-Nehmen-Training.' },
-  { cond: 'any', text: 'Regen? Solange der Ball rollt, ist alles gut.' }
-];
+const FVH_QUOTES = {
+  ice: [
+    '❄️ Minusgrade! Zieht eure Kinder warm an – mehrere Schichten, Mütze, Handschuhe. FVH-Kämpfer trotzen der Kälte! 🔥💪',
+    '🥶 Es ist eisig! Aber FVH-Training fällt nicht aus. Warme Kleidung ist heute Pflicht! 🧤🧣',
+    '❄️ Kältewelle? FVH-Spieler lachen drüber! Gut einpacken und los – Bewegung hält warm! 🔥⚽',
+    '🥶 Schnee und Matsch? Solange der Ball rollt, wird trainiert! Heute seid ihr Helden! ❄️💚'
+  ],
+  cold: [
+    '🌡️ Frische 5 Grad – perfekt zum Laufen, weniger zum Frieren. Lange Klamotten nicht vergessen! FVH🔥⚽',
+    '🧥 Kühles Wetter – warme Kids! Zieht eure Spieler gut an, dann klappt\'s auch mit dem Training! 💚',
+    '🌬️ Kühl und windig? Das ist Fußballwetter! Wer heute kommt, wird belohnt! FVH💪',
+    '🧣 Kalte Tage härten ab. In der Rückrunde seid ihr nicht zu bremsen! FVH🔥⚽'
+  ],
+  mild: [
+    '🌤️ Optimale 15 Grad – bestes Fußballwetter! Heute richtig Bock zeigen! FVH⚽💪',
+    '🍂 Mildes Wetter, guter Platz – heute wird gearbeitet! FVH-Jungs, voll dabei! 🔥',
+    '🌡️ Angenehme Temperaturen, kein Regen – beste Voraussetzungen. Nutzt den Tag! FVH💚',
+    '☁️ 18 Grad und bewölkt – ideal zum Kicken. FVH D-Jugend, genießt das Training! ⚽'
+  ],
+  warm: [
+    '☀️ 25 Grad – Sommerfußball! Trinkflasche einpacken, Kappe auf! FVH denkt an eure Gesundheit! 💧⚽',
+    '🌡️ Warm da draußen! Bitte ausreichend trinken – Wasser ist heute Pflicht! FVH☀️💪',
+    '☀️ Heißer Tag, heißes Training! Mehr Trinkpausen, weniger Ausreden. FVH🔥💧',
+    '🌤️ Sommerwetter genießen – aber Sonnenschutz und Wasser nicht vergessen! FVH💚'
+  ],
+  hot: [
+    '🔥 Über 30 Grad! Training wird angepasst – Gesundheit geht vor. Trinken, trinken, trinken! FVH☀️💧',
+    '🥵 33 Grad im Schatten! Heute gilt: auf den Körper hören, Pausen machen, viel Wasser! 💚',
+    '🔥 Hitze da draußen? Wir passen das Training an, aber wer kommt, zeigt Charakter! FVH💪☀️',
+    '☀️ Kein Hitzefrei beim FVH! Aber mit Vernunft: Trinkflasche ist Pflicht! 💧⚽'
+  ],
+  rain: [
+    '🌧️ Regen bringt Matsch – Matsch bringt Spaß! Heute wird\'s dreckig, FVH-Jungs! ⚽💪😄',
+    '☔ Regenzeug einpacken! FVH-Training fällt nicht aus – Ausreden schon! 🌧️🔥',
+    '🌧️ Nasses Trikot, nasser Ball – trotzdem volle Leistung! FVH-Kämpferherz! ❤️⚽',
+    '☔ Matschtore zählen doppelt! Die besten Geschichten schreibt der Matsch! FVH🔥💪'
+  ],
+  storm: [
+    '⚡ Gewitterwarnung! Heute kein Training – Sicherheit geht vor! FVH denkt an euch ❤️',
+    '⛈️ Blitz und Donner – Training abgesagt. Morgen seid ihr wieder da! FVH💪'
+  ],
+  any: [
+    '⚽ FVH D-Jugend – heute wieder voll dabei? Jede Einheit zählt! 💪',
+    '💚 FVH – gemeinsam stärker! Heute zeigen, was in uns steckt! 🔥',
+    '🏆 Titel gewinnt man im Training. Jeder Schritt nach vorne zählt! FVH⚽',
+    '🔥 Training ist kein Muss – es ist ein Geschenk. FVH-Jungs, nutzt es! 💪',
+    '⚽ Der Ball rollt nur, wenn ihr ihn tretet. FVH D-Jugend – macht Lärm! 🔥',
+    '💪 Heute wieder Gas geben! FVH D-Jugend – ihr seid die Zukunft! ⚽🌟',
+    '🔥 Ein FVH-Spieler gibt nie auf. Egal bei welchem Wetter! 💚⚽',
+    '⚽ Training heute? Keine Frage! FVH-Jungs, zeigt Präsenz! 💪🔥'
+  ]
+};
 
-function getWeatherQuote(code) {
-  let cond = 'any';
-  if (code <= 3) cond = 'sun';
-  else if (code >= 95) cond = 'rain';
-  else if (code >= 80) cond = 'rain';
-  else if (code >= 55) cond = 'rain';
-  else if (code >= 51) cond = 'rain';
-  const pool = WEATHER_QUOTES.filter(q => q.cond === cond || q.cond === 'any');
-  return pool[Math.floor(Math.random() * pool.length)].text;
+function getQuotePoolKey(temp, code) {
+  if (code >= 95) return 'storm';
+  if (code >= 55 || code >= 51 || code >= 80) return 'rain';
+  if (temp <= -5) return 'ice';
+  if (temp < 5) return 'cold';
+  if (temp < 20) return 'mild';
+  if (temp < 28) return 'warm';
+  return 'hot';
+}
+
+function getDailyQuote(temp, code) {
+  const today = todayStr();
+  const poolKey = getQuotePoolKey(temp, code);
+  try {
+    const saved = localStorage.getItem('fvh_daily_quote');
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (parsed.date === today && parsed.pool === poolKey && parsed.quote) return parsed.quote;
+    }
+  } catch (e) {}
+  // new day or changed weather – pick fresh quote
+  const pool = FVH_QUOTES[poolKey] || FVH_QUOTES.any;
+  let lastQuote = '';
+  try { lastQuote = JSON.parse(localStorage.getItem('fvh_daily_quote') || '{}').quote || ''; } catch(e) {}
+  const available = pool.filter(q => q !== lastQuote);
+  const pick = available.length > 0 ? available[Math.floor(Math.random() * available.length)] : pool[0];
+  try { localStorage.setItem('fvh_daily_quote', JSON.stringify({ date: today, pool: poolKey, quote: pick })); } catch(e) {}
+  return pick;
 }
 
 function getWeatherEmoji(code) {
@@ -1430,14 +1464,12 @@ function renderPlayers() {
     </div>
     <div id="player-list">
       ${state.players.map(p => {
-        const ampel = getPlayerAmpel(p.id);
         const attPct = getPlayerAttendancePct(p.id);
         const behavPct = getPlayerBehaviorPct(p.id);
         const r = p.rating || { fitness: 3, technique: 3, matchPerf: 3 };
         const matchSpiel = getPlayerMatchAvg(p.id, 'spiel');
         const matchZk = getPlayerMatchAvg(p.id, 'zweikampf');
         const matchSv = getPlayerMatchAvg(p.id, 'verstaendnis');
-        const ampelLabel = ampel.label;
         const isExpanded = playerExpanded[p.id];
         const matchCount = seasonMatches.filter(m => m.playerRatings && m.playerRatings[p.id] && m.playerRatings[p.id].spiel > 0).length;
         const playerMatches = seasonMatches.filter(m => m.poll && m.poll[p.id] === 'yes').sort((a,b) => b.date.localeCompare(a.date));
@@ -1449,7 +1481,6 @@ function renderPlayers() {
               <div class="player-info">
                 <div class="player-name">${escHtml(p.name)}</div>
                 <div class="player-number">${p.number ? '#' + p.number : ''} · ${attPct}% · 😊 ${behavPct}% · 🏃${r.fitness}⚽${r.technique}</div>
-                <div style="font-size:12px;margin-top:2px;"><span class="ampel-dot ${ampel.level}" style="display:inline-block;width:10px;height:10px;vertical-align:middle;"></span> ${ampelLabel}</div>
               </div>
               <div style="position:absolute;top:12px;right:12px;font-size:12px;color:var(--text-secondary);">${isExpanded ? '▲' : '▼'}</div>
             </div>
@@ -1731,10 +1762,6 @@ function renderTraining() {
 function renderMatchday() {
   const content = $('#app-content');
   const today = todayStr();
-  const playerStats = state.players.map(p => ({ ...p, ampel: getPlayerAmpel(p.id) }));
-  const greenCount = playerStats.filter(p => p.ampel.level === 'green').length;
-  const yellowCount = playerStats.filter(p => p.ampel.level === 'yellow').length;
-  const redCount = playerStats.filter(p => p.ampel.level === 'red').length;
   const allMatches = [...getSeasonMatches()].sort((a,b) => a.date.localeCompare(b.date));
 
   if (selectedMatchId) {
@@ -1762,26 +1789,13 @@ function renderMatchday() {
     return html;
   }
 
-  function buildAmpelHtml(p) {
-    var dot = p.ampel.level === 'green' ? '🟢' : p.ampel.level === 'yellow' ? '🟡' : '🔴';
-    return '<div class="ampel-row"><span>' + dot + '</span><div class="ampel-name">' + escHtml(p.name) + '</div><div class="ampel-count">' + p.ampel.count + ' Trainings</div></div>';
-  }
-
   content.innerHTML = [
     '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">',
     '<span style="font-size:16px;font-weight:700;color:var(--primary);">' + allMatches.length + ' Spiele</span>',
     '<button class="btn btn-small btn-primary" onclick="addMatch()">+ Hinzufügen</button></div>',
     allMatches.length === 0
       ? '<div class="empty-state"><div class="empty-state-icon">📅</div><div class="empty-state-text">Noch keine Spiele eingetragen</div><button class="btn btn-primary" onclick="addMatch()">Erstes Spiel hinzufügen</button></div>'
-      : allMatches.map(buildMatchHtml).join(''),
-    '<div class="card"><div class="card-title">📊 Spielberechtigung</div>',
-    '<div class="stats-row" style="margin-bottom:16px;">',
-    '<div class="stat-card" style="background:#E8F5E9;border-radius:12px;"><div class="stat-value" style="color:var(--success);">' + greenCount + '</div><div class="stat-label">Spielberechtigt</div></div>',
-    '<div class="stat-card" style="background:#FFF8E1;border-radius:12px;"><div class="stat-value" style="color:var(--warning);">' + yellowCount + '</div><div class="stat-label">Knapp</div></div>',
-    '<div class="stat-card" style="background:#FFEBEE;border-radius:12px;"><div class="stat-value" style="color:var(--danger);">' + redCount + '</div><div class="stat-label">Nicht berechtigt</div></div>',
-    '</div>',
-    playerStats.map(buildAmpelHtml).join(''),
-    '</div>'
+      : allMatches.map(buildMatchHtml).join('')
   ].join('');
 }
 
@@ -2356,14 +2370,6 @@ function renderSettings() {
         ${!state.settings.seasons.includes('24/25') ? `
           <button class="btn btn-small btn-secondary" style="margin-top:4px;margin-left:8px;" onclick="seedSeason24_25()">📂 Simulierte Saison 24/25 laden</button>
         ` : ''}
-      </div>
-
-      <div class="settings-group">
-        <h3>Team</h3>
-        <div class="settings-row">
-          <label>Trainingsschwelle (für Spielberechtigung)</label>
-          <input type="number" id="set-threshold" value="${state.settings.trainingThreshold}" min="1" max="10" onchange="state.settings.trainingThreshold=parseInt(this.value)||3;saveState();">
-        </div>
       </div>
 
       <div class="settings-group">

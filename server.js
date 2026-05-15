@@ -211,24 +211,58 @@ app.delete('/api/poll/clear/:matchId', (req, res) => {
 });
 
 // ─── Wetter-Sprüche ─────────────────────────────────────────
-const BOT_QUOTES = [
-  'Schönwetter-Spieler gibt\'s im Park. FVH-Spieler kommen auch bei Regen.',
-  'Training fällt nicht aus – nur die Ausreden werden leichter.',
-  'Die Sonne scheint nur für Zuschauer. Spieler schwitzen.',
-  'Bei dem Wetter bleiben die Schwachen zu Hause. Du bist hier.',
-  'Es gibt kein schlechtes Wetter – nur falsche Kleidung.',
-  'Regen macht dich nicht nass. Er wäscht die Ausreden weg.',
-  'Bei Regen wird man nicht nass – man wird härter.',
-  'Die besten Spiele werden im Regen entschieden.',
-  'Kälte ist eine Frage der Einstellung. Und der zweiten Lage.',
-  'Frieren kann ich auch zu Hause. Aber gewinnen nur hier.',
-  'Ball ist rund, Platz ist nass, Füße sind kalt – Augen sind heiß.',
-  'Im November werden keine Titel gewonnen. Sondern im März dankbar.',
-  'Das Wetter ist keine Einladung – es ist eine Ausrede.',
-  'Andere Vereine haben Wetter. Wir haben Training.',
-  'Der FVH macht kein Schlecht-Wetter-Training. Sondern Hart-im-Nehmen-Training.',
-  'Regen? Solange der Ball rollt, ist alles gut.'
-];
+const BOT_QUOTES = {
+  ice: [
+    '❄️ Minusgrade! Zieht eure Kinder warm an – mehrere Schichten, Mütze, Handschuhe. FVH-Kämpfer trotzen der Kälte! 🔥💪',
+    '🥶 Es ist eisig! Aber FVH-Training fällt nicht aus. Warme Kleidung ist heute Pflicht! 🧤🧣',
+    '❄️ Kältewelle? FVH-Spieler lachen drüber! Gut einpacken und los – Bewegung hält warm! 🔥⚽',
+    '🥶 Schnee und Matsch? Solange der Ball rollt, wird trainiert! Heute seid ihr Helden! ❄️💚'
+  ],
+  cold: [
+    '🌡️ Frische 5 Grad – perfekt zum Laufen, weniger zum Frieren. Lange Klamotten nicht vergessen! FVH🔥⚽',
+    '🧥 Kühles Wetter – warme Kids! Zieht eure Spieler gut an, dann klappt\'s auch mit dem Training! 💚',
+    '🌬️ Kühl und windig? Das ist Fußballwetter! Wer heute kommt, wird belohnt! FVH💪',
+    '🧣 Kalte Tage härten ab. In der Rückrunde seid ihr nicht zu bremsen! FVH🔥⚽'
+  ],
+  mild: [
+    '🌤️ Optimale 15 Grad – bestes Fußballwetter! Heute richtig Bock zeigen! FVH⚽💪',
+    '🍂 Mildes Wetter, guter Platz – heute wird gearbeitet! FVH-Jungs, voll dabei! 🔥',
+    '🌡️ Angenehme Temperaturen, kein Regen – beste Voraussetzungen. Nutzt den Tag! FVH💚',
+    '☁️ 18 Grad und bewölkt – ideal zum Kicken. FVH D-Jugend, genießt das Training! ⚽'
+  ],
+  warm: [
+    '☀️ 25 Grad – Sommerfußball! Trinkflasche einpacken, Kappe auf! FVH denkt an eure Gesundheit! 💧⚽',
+    '🌡️ Warm da draußen! Bitte ausreichend trinken – Wasser ist heute Pflicht! FVH☀️💪',
+    '☀️ Heißer Tag, heißes Training! Mehr Trinkpausen, weniger Ausreden. FVH🔥💧',
+    '🌤️ Sommerwetter genießen – aber Sonnenschutz und Wasser nicht vergessen! FVH💚'
+  ],
+  hot: [
+    '🔥 Über 30 Grad! Training wird angepasst – Gesundheit geht vor. Trinken, trinken, trinken! FVH☀️💧',
+    '🥵 33 Grad im Schatten! Heute gilt: auf den Körper hören, Pausen machen, viel Wasser! 💚',
+    '🔥 Hitze da draußen? Wir passen das Training an, aber wer kommt, zeigt Charakter! FVH💪☀️',
+    '☀️ Kein Hitzefrei beim FVH! Aber mit Vernunft: Trinkflasche ist Pflicht! 💧⚽'
+  ],
+  rain: [
+    '🌧️ Regen bringt Matsch – Matsch bringt Spaß! Heute wird\'s dreckig, FVH-Jungs! ⚽💪😄',
+    '☔ Regenzeug einpacken! FVH-Training fällt nicht aus – Ausreden schon! 🌧️🔥',
+    '🌧️ Nasses Trikot, nasser Ball – trotzdem volle Leistung! FVH-Kämpferherz! ❤️⚽',
+    '☔ Matschtore zählen doppelt! Die besten Geschichten schreibt der Matsch! FVH🔥💪'
+  ],
+  storm: [
+    '⚡ Gewitterwarnung! Heute kein Training – Sicherheit geht vor! FVH denkt an euch ❤️',
+    '⛈️ Blitz und Donner – Training abgesagt. Morgen seid ihr wieder da! FVH💪'
+  ],
+  any: [
+    '⚽ FVH D-Jugend – heute wieder voll dabei? Jede Einheit zählt! 💪',
+    '💚 FVH – gemeinsam stärker! Heute zeigen, was in uns steckt! 🔥',
+    '🏆 Titel gewinnt man im Training. Jeder Schritt nach vorne zählt! FVH⚽',
+    '🔥 Training ist kein Muss – es ist ein Geschenk. FVH-Jungs, nutzt es! 💪',
+    '⚽ Der Ball rollt nur, wenn ihr ihn tretet. FVH D-Jugend – macht Lärm! 🔥',
+    '💪 Heute wieder Gas geben! FVH D-Jugend – ihr seid die Zukunft! ⚽🌟',
+    '🔥 Ein FVH-Spieler gibt nie auf. Egal bei welchem Wetter! 💚⚽',
+    '⚽ Training heute? Keine Frage! FVH-Jungs, zeigt Präsenz! 💪🔥'
+  ]
+};
 
 // Trainingstage-Konfiguration speichern/laden
 const TRAININGDAYS_FILE = path.join(__dirname, '.trainingdays');
@@ -248,14 +282,39 @@ function saveTrainingDays(days) {
   } catch (e) {}
 }
 
+function getQuotePoolKey(temp, code) {
+  if (code >= 95) return 'storm';
+  if (code >= 55 || code >= 51 || code >= 80) return 'rain';
+  if (temp <= -5) return 'ice';
+  if (temp < 5) return 'cold';
+  if (temp < 20) return 'mild';
+  if (temp < 28) return 'warm';
+  return 'hot';
+}
+
 // Bot-Quote senden (per Webhook von cron)
-app.post('/api/bot/quote', (req, res) => {
+app.post('/api/bot/quote', async (req, res) => {
   if (!bot || !botReady) return res.status(503).json({ error: 'Bot nicht verfügbar' });
   const groupId = getTelegramGroupId();
   if (!groupId) return res.status(400).json({ error: 'Keine Gruppe konfiguriert' });
 
-  const quote = req.body.text || BOT_QUOTES[Math.floor(Math.random() * BOT_QUOTES.length)];
-  bot.sendMessage(groupId, `💬 *FVH-Spruch des Tages:*\n\n_${quote}_`, { parse_mode: 'Markdown' })
+  let quote = req.body.text;
+  if (!quote) {
+    // Wetter abfragen und passenden Spruch wählen
+    try {
+      const weatherRes = await fetch('https://api.open-meteo.com/v1/forecast?latitude=48.806&longitude=8.222&current=temperature_2m,weather_code&timezone=auto');
+      const weatherData = await weatherRes.json();
+      const temp = weatherData.current.temperature_2m;
+      const code = weatherData.current.weather_code;
+      const poolKey = getQuotePoolKey(temp, code);
+      const pool = BOT_QUOTES[poolKey] || BOT_QUOTES.any;
+      quote = pool[Math.floor(Math.random() * pool.length)];
+    } catch (e) {
+      const all = [].concat(...Object.values(BOT_QUOTES));
+      quote = all[Math.floor(Math.random() * all.length)];
+    }
+  }
+  bot.sendMessage(groupId, `💬 *FVH-Spruch des Tages:*\n\n${quote}`, { parse_mode: 'Markdown' })
     .then(() => res.json({ success: true }))
     .catch(err => res.status(500).json({ error: err.message }));
 });
