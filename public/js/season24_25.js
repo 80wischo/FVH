@@ -200,6 +200,10 @@
         }
       }
 
+      var homeGoals = isHome ? Math.floor(Math.random() * 5) : Math.floor(Math.random() * 4);
+      var awayGoals = isHome ? Math.floor(Math.random() * 4) : Math.floor(Math.random() * 5);
+      if (gegnerIdx % 3 === 0) { homeGoals++; }
+      if (gegnerIdx % 5 === 0) { awayGoals++; }
       matches.push({
         id: matchId++,
         date: dateStr,
@@ -208,6 +212,8 @@
         isHome,
         location: isHome ? 'Sportplatz FVH' : opponent,
         time: '13:00',
+        homeGoals,
+        awayGoals,
         poll,
         playerRatings,
         lineup: null,

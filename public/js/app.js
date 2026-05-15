@@ -86,6 +86,8 @@ function migrateState() {
     state.matches.forEach(m => {
       if (!m.season) m.season = '25/26';
       if (!m.playerRatings) m.playerRatings = {};
+      if (m.homeGoals === undefined) m.homeGoals = null;
+      if (m.awayGoals === undefined) m.awayGoals = null;
       if (m.kader === undefined) m.kader = null;
       if (m.lineup === undefined) m.lineup = null;
       if (!m.tasks) m.tasks = {};
@@ -797,6 +799,16 @@ function autoAssignLaundry(matchId) {
   render();
 }
 
+function setMatchScore(matchId) {
+  const m = state.matches.find(x => x.id === matchId);
+  if (!m) return;
+  const home = parseInt($('#match-home-goals')?.value);
+  const away = parseInt($('#match-away-goals')?.value);
+  m.homeGoals = isNaN(home) ? null : home;
+  m.awayGoals = isNaN(away) ? null : away;
+  saveState();
+}
+
 function setMatchRating(matchId, playerId, cat, val) {
   const m = state.matches.find(x => x.id === matchId);
   if (!m) return;
@@ -814,7 +826,8 @@ function getPlayerMatchAvg(playerId, cat) {
     if (r && r[cat] && r[cat] > 0) ratings.push(r[cat]);
   }
   if (ratings.length === 0) return 0;
-  return Math.round(ratings.reduce((a,b) => a + b, 0) / ratings.length);
+  const avg = ratings.reduce((a,b) => a + b, 0) / ratings.length;
+  return Math.round(avg * 2) / 2; // round to nearest 0.5
 }
 
 // ─── Kader für Telegram-Umfrage ────────────────────────────
@@ -1180,12 +1193,6 @@ function renderDashboard() {
 
   var behavPlayers = perPlayerStats.filter(function(p){return p.behavPct > 0}).sort(function(a,b){return b.behavPct - a.behavPct});
 
-  var overallCount = 0, overallGood = 0;
-  seasonTrainings.forEach(function(t) {
-    if (t.overall) { overallCount++; if (t.overall === 'good' || t.overall === 'ok') overallGood++; }
-  });
-  var avgOverall = overallCount > 0 ? Math.round(overallGood / overallCount * 100) : 0;
-
   var lastTraining = seasonTrainings.filter(function(t){return t.date < today || t.date === today}).sort(function(a,b){return b.date.localeCompare(a.date)})[0];
   var lastAttended = 0, lastTotal = 0;
   if (lastTraining) {
@@ -1302,12 +1309,22 @@ function renderDashboard() {
   });
   html.push('</div></div>');
 
-  html.push('<div style="padding:8px 0;">');
-  html.push('<div style="font-size:15px;font-weight:700;color:var(--primary);margin-bottom:6px;">Motivation</div>');
-  html.push('<div style="font-size:40px;font-weight:800;color:var(--text);line-height:1;margin-bottom:10px;">' + avgOverall + '%</div>');
-  html.push('</div>');
-
   html.push('</div></div>');
+
+  // ─── Saison-Bilanz ───────────────────────────────────────
+  var played = seasonMatches.filter(function(m){ return m.homeGoals !== null && m.awayGoals !== null; });
+  var wins = played.filter(function(m){ return (m.isHome && m.homeGoals > m.awayGoals) || (!m.isHome && m.awayGoals > m.homeGoals); });
+  var losses = played.filter(function(m){ return (m.isHome && m.homeGoals < m.awayGoals) || (!m.isHome && m.awayGoals < m.homeGoals); });
+  var draws = played.filter(function(m){ return m.homeGoals === m.awayGoals; });
+  if (played.length > 0) {
+    html.push('<div class="card"><div class="card-title">📅 Saison ' + state.settings.season + '</div>');
+    html.push('<div style="display:flex;justify-content:space-around;text-align:center;padding:8px 0;">');
+    html.push('<div><div style="font-size:28px;font-weight:800;color:var(--primary);">' + played.length + '</div><div style="font-size:12px;color:var(--text-secondary);">Spiele</div></div>');
+    html.push('<div><div style="font-size:28px;font-weight:800;color:#4CAF50;">' + wins.length + '</div><div style="font-size:12px;color:var(--text-secondary);">S</div></div>');
+    html.push('<div><div style="font-size:28px;font-weight:800;color:#FF9800;">' + draws.length + '</div><div style="font-size:12px;color:var(--text-secondary);">U</div></div>');
+    html.push('<div><div style="font-size:28px;font-weight:800;color:#F44336;">' + losses.length + '</div><div style="font-size:12px;color:var(--text-secondary);">N</div></div>');
+    html.push('</div></div>');
+  }
 
   if (recentEvents.length > 0) {
     html.push('<div class="card"><div class="card-title">📋 Letzte Aktivitäten</div>');
@@ -1685,6 +1702,10 @@ function renderMatchday() {
     html += '<div class="match-card" style="border-left-color:' + (isUpcoming ? 'var(--primary)' : 'var(--text-secondary)') + ';margin-bottom:0;">';
     html += '<div class="match-date">' + formatDateLong(m.date) + (m.time ? ' um ' + m.time : '') + '</div>';
     html += '<div class="match-opponent">⚽ vs ' + escHtml(m.opponent) + '</div>';
+    if (m.homeGoals !== null && m.awayGoals !== null) {
+      var scoreColor = (m.isHome && m.homeGoals > m.awayGoals) || (!m.isHome && m.awayGoals > m.homeGoals) ? '#4CAF50' : (m.homeGoals === m.awayGoals ? '#FF9800' : '#F44336');
+      html += '<div style="font-size:22px;font-weight:800;color:' + scoreColor + ';margin:2px 0;">' + m.homeGoals + ':' + m.awayGoals + '</div>';
+    }
     html += '<div class="match-location">' + (m.isHome ? '🏠 Heimspiel' : '✈️ Auswärts') + ' · ' + escHtml(m.location || (m.isHome ? 'Eigener Platz' : 'N.N.')) + '</div>';
     if (m.isHome) html += '<div style="font-size:12px;margin-top:4px;color:var(--text-secondary);">🧁 Budenbetreuung · 🛠️ Auf/Abbau</div>';
     html += '<div style="font-size:12px;margin-top:4px;color:var(--text-secondary);">📋 ✅' + pollYes + ' ❓' + pollMaybe + ' ❌' + pollNo + ' · ' + state.players.length + ' Spieler</div>';
@@ -1744,11 +1765,17 @@ function renderMatchDetail() {
   content.innerHTML = [
     '<div class="card">',
     '<div style="display:flex;align-items:center;justify-content:space-between;">',
-    '<div class="card-title" style="margin-bottom:0;">⚽ vs ' + escHtml(m.opponent) + '</div>',
+    '<div class="card-title" style="margin-bottom:0;">⚽ vs ' + escHtml(m.opponent) + (m.homeGoals !== null && m.awayGoals !== null ? ' <span style="font-size:22px;">' + m.homeGoals + ':' + m.awayGoals + '</span>' : '') + '</div>',
     '<button class="btn btn-small" style="width:auto;padding:4px 12px;background:var(--bg);" onclick="closeMatchDetail()">✕ Zurück</button>',
     '</div>',
     '<div style="font-size:14px;color:var(--text-secondary);margin-top:8px;">' + formatDateLong(m.date) + (m.time ? ' um ' + m.time + ' Uhr' : '') + '</div>',
     '<div style="font-size:14px;color:var(--text-secondary);">' + (m.isHome ? '🏠 Heimspiel' : '✈️ Auswärtsspiel') + ' · ' + escHtml(m.location || (m.isHome ? 'Eigener Platz' : 'N.N.')) + '</div>',
+    '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;font-size:16px;">',
+    '<span style="font-weight:600;">' + escHtml(m.opponent) + '</span>',
+    '<input type="number" id="match-home-goals" value="' + (m.homeGoals !== null ? m.homeGoals : '') + '" min="0" max="20" placeholder="-" onchange="setMatchScore(' + m.id + ')" style="width:50px;text-align:center;font-size:18px;font-weight:700;padding:4px;border:2px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);">',
+    '<span style="font-weight:700;">:</span>',
+    '<input type="number" id="match-away-goals" value="' + (m.awayGoals !== null ? m.awayGoals : '') + '" min="0" max="20" placeholder="-" onchange="setMatchScore(' + m.id + ')" style="width:50px;text-align:center;font-size:18px;font-weight:700;padding:4px;border:2px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);">',
+    '</div>',
     '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">',
     '<button class="btn btn-small btn-secondary" style="width:auto;" onclick="shareMatchPoll(' + m.id + ')">📋 Abstimmung kopieren</button>',
     '<button class="btn btn-small btn-secondary" style="width:auto;" data-mi="' + m.id + '" onclick="startPoll(this.dataset.mi,\'spieler\')">📲 Telegram-Umfrage</button>',
@@ -1772,12 +1799,27 @@ function renderMatchDetail() {
       var zk = r ? r.zweikampf : 0;
       var sv = r ? r.verstaendnis : 0;
       function starHtml(cat, val) {
-        return [1,2,3,4,5].map(function(i) {
-          var s = i <= val ? '⭐' : '☆';
-          return '<span style="cursor:pointer;font-size:16px;" onclick="setMatchRating(' + m.id + ',' + p.id + ",'" + cat + "'," + i + ')">' + s + '</span>';
-        }).join('');
+        var h = '';
+        for (var si = 1; si <= 5; si++) {
+          var isFull = val >= si;
+          var isHalf = val >= si - 0.5 && val < si;
+          h += '<span style="display:inline-block;width:1.3em;height:1.3em;position:relative;font-size:15px;vertical-align:middle;">';
+          h += '<span style="position:absolute;inset:0;color:#ccc;font-size:15px;line-height:1.3;">★</span>';
+          if (isFull) h += '<span style="position:absolute;inset:0;color:#FFD700;font-size:15px;line-height:1.3;">★</span>';
+          else if (isHalf) h += '<span style="position:absolute;inset:0;color:#FFD700;font-size:15px;line-height:1.3;width:50%;overflow:hidden;">★</span>';
+          h += '<span style="position:absolute;inset:0;width:50%;cursor:pointer;" onclick="setMatchRating(' + m.id + ',' + p.id + ",'" + cat + "'," + (si - 0.5) + ')"></span>';
+          h += '<span style="position:absolute;inset:0;left:50%;width:50%;cursor:pointer;" onclick="setMatchRating(' + m.id + ',' + p.id + ",'" + cat + "'," + si + ')"></span>';
+          h += '</span>';
+        }
+        return h;
       }
-      return '<div style="display:flex;align-items:center;gap:6px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;flex-wrap:wrap;"><span style="font-weight:600;width:80px;">' + escHtml(p.name) + '</span><span style="font-size:11px;color:var(--text-secondary);width:70px;">⚽ Spiel</span><span>' + starHtml('spiel', spiel) + '</span><span style="font-size:11px;color:var(--text-secondary);width:80px;">💪 Zweikampf</span><span>' + starHtml('zweikampf', zk) + '</span><span style="font-size:11px;color:var(--text-secondary);width:80px;">🧠 Verständnis</span><span>' + starHtml('verstaendnis', sv) + '</span></div>';
+      return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
+        + '<div style="font-weight:600;font-size:14px;margin-bottom:4px;">' + escHtml(p.name) + '</div>'
+        + '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">'
+        + '<span style="font-size:12px;color:var(--text-secondary);">⚽</span><span>' + starHtml('spiel', spiel) + '</span>'
+        + '<span style="font-size:12px;color:var(--text-secondary);">💪</span><span>' + starHtml('zweikampf', zk) + '</span>'
+        + '<span style="font-size:12px;color:var(--text-secondary);">🧠</span><span>' + starHtml('verstaendnis', sv) + '</span>'
+        + '</div></div>';
     }).join(''),
     '</div></div>',
     '<div style="margin-bottom:16px;"><div class="card-title" onclick="toggleCollapse(\'helpers\')" style="cursor:pointer;">🔧 Helfer-Aufgaben <span style="margin-left:auto;font-size:12px;color:var(--text-secondary);">' + (uiCollapsed.helpers ? '▸' : '▾') + '</span></div><div style="display:' + (uiCollapsed.helpers ? 'none' : 'block') + '">' + renderMatchTasks(m) + '</div></div>'
