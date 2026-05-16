@@ -100,7 +100,7 @@
     const v = [0,0,0];
     for (let i = 0; i < 3; i++) {
       let val = base[i] + (rand() - 0.5) * 1.0;
-      val = Math.max(1, Math.min(5, Math.round(val * 2) / 2));
+      val = Math.max(1, Math.min(5, Math.round(val)));
       v[i] = val;
     }
     return { zweikampf: v[0], verstaendnis: v[1], einsatz: v[2] };

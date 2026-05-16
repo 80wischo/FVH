@@ -330,6 +330,10 @@ function clickRating(playerId, cat, val) {
   const p = state.players.find(x => x.id === playerId);
   if (!p) return;
   if (!p.rating) p.rating = { mental: 3, technique: 3, ausdauer: 3 };
+  if (!p.rating._prev) p.rating._prev = {};
+  if (p.rating[cat] !== undefined && p.rating[cat] !== val) {
+    p.rating._prev[cat] = p.rating[cat];
+  }
   p.rating[cat] = val;
   p.rating.updatedAt = Date.now();
   saveState();
@@ -543,41 +547,6 @@ function renderTimer() {
   const mins = Math.floor(timerSeconds / 60);
   const secs = timerSeconds % 60;
   el.textContent = String(mins).padStart(2, '0') + ':' + String(secs).padStart(2, '0');
-}
-
-function shareWhatsApp(text) {
-  const encoded = encodeURIComponent(text);
-  window.open(`https://wa.me/?text=${encoded}`, '_blank');
-}
-
-function shareMatchPoll(matchId) {
-  const m = state.matches.find(x => x.id === matchId);
-  if (!m) return;
-  var title = 'Wer ist am ' + formatDate(m.date) + ' vs ' + m.opponent + ' dabei?';
-  var options = state.players.map(function(p) { return '☐ ' + p.name; });
-  if (m.isHome) {
-    options.push('--- Heimspiel Helfer ---');
-    options.push('🧁 Kuchen:');
-    options.push('🏪 Buden:');
-    options.push('🛠️ Aufbau:');
-    options.push('🔨 Abbau:');
-  }
-  var text = title + '\n\n' + options.join('\n');
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(text).then(function() {
-      alert('📋 Kopiert!\n\n1. WhatsApp öffnen\n 2. In die Gruppe + → Abstimmung\n 3. Frage einfügen\n 4. Optionen einfügen');
-    }).catch(function() { fallbackCopy(text); });
-  } else { fallbackCopy(text); }
-}
-
-function fallbackCopy(text) {
-  var ta = document.createElement('textarea');
-  ta.value = text;
-  ta.style.cssText = 'position:fixed;opacity:0;';
-  document.body.appendChild(ta); ta.select();
-  try { document.execCommand('copy'); alert('📋 Kopiert! Jetzt in WhatsApp als Abstimmung einfügen.'); }
-  catch(e) { prompt('Manuell kopieren:', text); }
-  document.body.removeChild(ta);
 }
 
 function getWeather() {
@@ -906,7 +875,7 @@ function getPlayerMatchAvg(playerId, cat) {
   }
   if (ratings.length === 0) return 0;
   const avg = ratings.reduce((a,b) => a + b, 0) / ratings.length;
-  return Math.round(avg * 2) / 2;
+  return Math.floor(avg * 2) / 2;
 }
 
 function getPlayerSpielAvg(playerId) {
@@ -921,7 +890,7 @@ function getPlayerSpielAvg(playerId) {
   }
   if (ratings.length === 0) return 0;
   const avg = ratings.reduce((a,b) => a + b, 0) / ratings.length;
-  return Math.round(avg * 2) / 2;
+  return Math.floor(avg * 2) / 2;
 }
 
 // ─── Kader für Telegram-Umfrage ────────────────────────────
@@ -1546,7 +1515,36 @@ function renderPlayers() {
             </div>
             ${isExpanded ? `
               <div style="background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px;padding:12px;font-size:13px;">
-                ${seasonTrainings.length > 0 ? (function() {
+                ${playerMatches.length > 0 ? (function() {
+                  var playerMatchKey = 'playerMatchList_' + p.id;
+                  if (uiCollapsed[playerMatchKey] === undefined) uiCollapsed[playerMatchKey] = false;
+                  var mHtml = '<div style="font-weight:600;margin-bottom:2px;cursor:pointer;font-size:13px;" onclick="toggleCollapse(\'' + playerMatchKey + '\')">📊 Ø Spiele (' + matchCount + ' bewertet) <span style="font-size:11px;color:var(--text-secondary);">' + (uiCollapsed[playerMatchKey] ? '▸' : '▾') + '</span></div>'
+                    + (matchSpiel > 0 ? '<div style="font-weight:400;font-size:12px;color:var(--text-secondary);display:flex;gap:14px;flex-wrap:wrap;"><span>⚽' + matchSpiel + '</span><span>💪' + matchZk + '</span><span>🧠' + matchSv + '</span><span>🔥' + matchEinsatz + '</span></div>' : '')
+                  mHtml += '<div style="display:' + (uiCollapsed[playerMatchKey] ? 'none' : 'block') + '">';
+                  mHtml += '<div style="display:table;font-size:12px;color:var(--text-secondary);">';
+                  playerMatches.forEach(function(m) {
+                    var r2 = m.playerRatings && m.playerRatings[p.id];
+                    var z = r2 ? r2.zweikampf||0 : 0;
+                    var sv = r2 ? r2.verstaendnis||0 : 0;
+                    var e = r2 ? r2.einsatz||0 : 0;
+                    var vals = [z, sv, e].filter(function(v) { return v > 0; });
+                    var spielAvg = vals.length > 0 ? Math.floor(vals.reduce(function(a,b) { return a + b; }, 0) / vals.length * 2) / 2 : '-';
+                    mHtml += '<div style="display:table-row;">'
+                      + '<span style="display:table-cell;padding:1px 2px 1px 0;">⚽' + spielAvg + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">💪' + z + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">🧠' + sv + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">🔥' + e + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;padding-left:8px;">' + formatDate(m.date) + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">vs</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">' + escHtml(m.opponent) + '</span>'
+                      + '</div>';
+                  });
+                  mHtml += '</div>';
+                  mHtml += '</div>';
+                  return mHtml;
+                })() : ''}
+                <div style="margin-top:10px;padding-top:6px;border-top:1px solid var(--border);">
+                  ${seasonTrainings.length > 0 ? (function() {
                   var totalYes = 0, totalLate = 0, totalNo = 0;
                   var behavGood = 0, behavOk = 0, behavBad = 0, behavTotal = 0;
                   seasonTrainings.forEach(function(t) {
@@ -1564,37 +1562,25 @@ function renderPlayers() {
                   var bpG = behavTotal > 0 ? Math.round(behavGood / behavTotal * 100) : 0;
                   var bpO = behavTotal > 0 ? Math.round(behavOk / behavTotal * 100) : 0;
                   var bpB = behavTotal > 0 ? Math.round(behavBad / behavTotal * 100) : 0;
-                   return '<div style="display:flex;font-weight:600;margin-bottom:4px;font-size:14px;align-items:center;"><span>⚽ Training</span><span style="flex:1;min-width:8px;"></span><span style="font-weight:400;font-size:13px;color:var(--text-secondary);white-space:nowrap;">✅' + (totalYes + totalLate) + '  ⏰' + totalLate + '  ❌' + totalNo + (behavTotal > 0 ? '  😊' + behavGood + '🙂' + behavOk + '☹️' + behavBad : '') + '</span></div>';
+                    return '<div style="font-weight:600;font-size:13px;margin-bottom:2px;">⚽ Training</div><div style="font-weight:400;font-size:12px;color:var(--text-secondary);display:flex;gap:14px;flex-wrap:wrap;"><span>✅' + (totalYes + totalLate) + '</span><span>⏰' + totalLate + '</span><span>❌' + totalNo + '</span>' + (behavTotal > 0 ? '<span>😊' + behavGood + '</span><span>🙂' + behavOk + '</span><span>☹️' + behavBad + '</span>' : '') + '</div>';
                 })() : '<div style="font-size:12px;color:var(--text-secondary);">Keine Trainings in dieser Saison</div>'}
-                ${playerMatches.length > 0 ? (function() {
-                  var playerMatchKey = 'playerMatchList_' + p.id;
-                  if (uiCollapsed[playerMatchKey] === undefined) uiCollapsed[playerMatchKey] = false;
-                  var mHtml = '<div style="display:flex;font-weight:600;margin-top:12px;margin-bottom:4px;cursor:pointer;align-items:center;" onclick="toggleCollapse(\'' + playerMatchKey + '\')"><span>📊 Ø Spiele (' + matchCount + ' bewertet)</span><span style="flex:1;min-width:8px;"></span>'
-                    + (matchSpiel > 0 ? '<span style="font-weight:400;font-size:12px;color:var(--text-secondary);white-space:nowrap;">⚽' + matchSpiel + '  💪' + matchZk + '  🧠' + matchSv + '  🔥' + matchEinsatz + '</span>' : '')
-                    + ' <span style="font-size:12px;color:var(--text-secondary);flex-shrink:0;">' + (uiCollapsed[playerMatchKey] ? '▸' : '▾') + '</span></div>';
-                  mHtml += '<div style="display:' + (uiCollapsed[playerMatchKey] ? 'none' : 'block') + '">';
-                  mHtml += '<div style="display:table;font-size:12px;color:var(--text-secondary);">';
-                  playerMatches.forEach(function(m) {
-                    var r2 = m.playerRatings && m.playerRatings[p.id];
-                    var z = r2 ? r2.zweikampf||0 : 0;
-                    var sv = r2 ? r2.verstaendnis||0 : 0;
-                    var e = r2 ? r2.einsatz||0 : 0;
-                    var vals = [z, sv, e].filter(function(v) { return v > 0; });
-                    var spielAvg = vals.length > 0 ? Math.round(vals.reduce(function(a,b) { return a + b; }, 0) / vals.length * 2) / 2 : '-';
-                    mHtml += '<div style="display:table-row;">'
-                      + '<span style="display:table-cell;padding:1px 2px 1px 0;">⚽' + spielAvg + '</span>'
-                      + '<span style="display:table-cell;padding:1px 2px;">💪' + z + '</span>'
-                      + '<span style="display:table-cell;padding:1px 2px;">🧠' + sv + '</span>'
-                      + '<span style="display:table-cell;padding:1px 2px;">🔥' + e + '</span>'
-                      + '<span style="display:table-cell;padding:1px 2px;padding-left:8px;">' + formatDate(m.date) + '</span>'
-                      + '<span style="display:table-cell;padding:1px 2px;">vs</span>'
-                      + '<span style="display:table-cell;padding:1px 2px;">' + escHtml(m.opponent) + '</span>'
-                      + '</div>';
-                  });
-                  mHtml += '</div>';
-                  mHtml += '</div>';
-                  return mHtml;
-                })() : ''}
+                </div>
+                <div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border);font-size:13px;">
+                  <div style="font-weight:600;">📊 Monats-Rating <span style="font-weight:400;font-size:11px;color:var(--text-secondary);">${r.updatedAt ? `(zuletzt: ${new Date(r.updatedAt).toLocaleDateString('de-DE')})` : '(noch nie)'}</span></div>
+                  <div style="font-size:12px;display:flex;gap:14px;flex-wrap:wrap;margin-top:2px;">
+                    <span>❤️${r.mental}</span>
+                    <span>👟${r.technique}</span>
+                    <span>🏃${r.ausdauer}</span>
+                  </div>
+                  ${r._prev && (r._prev.mental !== undefined || r._prev.technique !== undefined || r._prev.ausdauer !== undefined) ? (function() {
+                    var cp = r._prev || {};
+                    var parts = [];
+                    if (cp.mental !== undefined && cp.mental !== r.mental) parts.push('❤️ ' + cp.mental + '→' + r.mental + (r.mental > cp.mental ? ' 🟢' : ' 🔴'));
+                    if (cp.technique !== undefined && cp.technique !== r.technique) parts.push('👟 ' + cp.technique + '→' + r.technique + (r.technique > cp.technique ? ' 🟢' : ' 🔴'));
+                    if (cp.ausdauer !== undefined && cp.ausdauer !== r.ausdauer) parts.push('🏃 ' + cp.ausdauer + '→' + r.ausdauer + (r.ausdauer > cp.ausdauer ? ' 🟢' : ' 🔴'));
+                    return parts.length > 0 ? '<div style="font-size:11px;color:var(--text-secondary);margin-top:1px;">↳ Veränderung: ' + parts.join(' · ') + '</div>' : '';
+                  })() : ''}
+                </div>
                 <div style="display:flex;gap:8px;margin-top:10px;">
                   <button class="btn btn-small btn-primary" onclick="event.stopPropagation();editPlayer(${p.id})">✏️ Bearbeiten</button>
                   <button class="btn btn-small btn-danger" onclick="event.stopPropagation();deletePlayer(${p.id})">🗑️ Löschen</button>
@@ -1866,7 +1852,7 @@ function renderMatchday() {
     html += '<div class="match-opponent">⚽ vs ' + escHtml(m.opponent) + '</div>';
     if (m.homeGoals !== null && m.awayGoals !== null) {
       var scoreColor = (m.isHome && m.homeGoals > m.awayGoals) || (!m.isHome && m.awayGoals > m.homeGoals) ? '#4CAF50' : (m.homeGoals === m.awayGoals ? '#FF9800' : '#F44336');
-      html += '<div style="font-size:22px;font-weight:800;color:' + scoreColor + ';margin:2px 0;">' + m.homeGoals + ':' + m.awayGoals + '</div>';
+      html += '<div style="font-size:22px;font-weight:800;color:' + scoreColor + ';margin:2px 0;">' + (m.isHome ? 'FVH ' + m.homeGoals + ':' + m.awayGoals + ' ' + escHtml(m.opponent) : escHtml(m.opponent) + ' ' + m.awayGoals + ':' + m.homeGoals + ' FVH') + '</div>';
     }
     html += '<div class="match-location">' + (m.isHome ? '🏠 Heimspiel' : '✈️ Auswärts') + ' · ' + escHtml(m.location || (m.isHome ? 'Eigener Platz' : 'N.N.')) + '</div>';
     if (m.isHome) html += '<div style="font-size:12px;margin-top:4px;color:var(--text-secondary);">🧁 Budenbetreuung · 🛠️ Auf/Abbau</div>';
@@ -1894,7 +1880,6 @@ function renderMatchDetail() {
   const pollYes = m.poll ? Object.values(m.poll).filter(v => v === 'yes').length : 0;
   const pollNo = m.poll ? Object.values(m.poll).filter(v => v === 'no').length : 0;
   const pollMaybe = m.poll ? Object.values(m.poll).filter(v => v === 'maybe').length : 0;
-  const wts = '⚽ Spieltag: FVH vs ' + m.opponent + ' (' + formatDate(m.date) + (m.time ? ' um ' + m.time : '') + ') - ' + (m.isHome ? '🏠 Heimspiel' : '✈️ Auswärtsspiel');
 
   function buildPollHtml(p) {
     var val = (m.poll && m.poll[p.id]) || '';
@@ -1914,21 +1899,20 @@ function renderMatchDetail() {
   content.innerHTML = [
     '<div class="card">',
     '<div style="display:flex;align-items:center;justify-content:space-between;">',
-    '<div class="card-title" style="margin-bottom:0;">⚽ vs ' + escHtml(m.opponent) + (m.homeGoals !== null && m.awayGoals !== null ? ' <span style="font-size:22px;">' + m.homeGoals + ':' + m.awayGoals + '</span>' : '') + '</div>',
+    '<div class="card-title" style="margin-bottom:0;">⚽ ' + (m.isHome ? 'FVH ' + (m.homeGoals !== null && m.awayGoals !== null ? m.homeGoals + ':' + m.awayGoals + ' ' : 'vs ') + escHtml(m.opponent) : escHtml(m.opponent) + (m.homeGoals !== null && m.awayGoals !== null ? ' ' + m.awayGoals + ':' + m.homeGoals + ' ' : ' vs ') + 'FVH') + '</div>',
     '<button class="btn btn-small" style="width:auto;padding:4px 12px;background:var(--bg);" onclick="closeMatchDetail()">✕ Zurück</button>',
     '</div>',
     '<div style="font-size:14px;color:var(--text-secondary);margin-top:8px;">' + formatDateLong(m.date) + (m.time ? ' um ' + m.time + ' Uhr' : '') + '</div>',
     '<div style="font-size:14px;color:var(--text-secondary);">' + (m.isHome ? '🏠 Heimspiel' : '✈️ Auswärtsspiel') + ' · ' + escHtml(m.location || (m.isHome ? 'Eigener Platz' : 'N.N.')) + '</div>',
     '<div style="margin-top:10px;display:flex;align-items:center;gap:8px;font-size:16px;">',
-    '<span style="font-weight:600;">' + escHtml(m.opponent) + '</span>',
+    '<span style="font-weight:600;">' + (m.isHome ? 'FVH' : escHtml(m.opponent)) + '</span>',
     '<input type="number" id="match-home-goals" value="' + (m.homeGoals !== null ? m.homeGoals : '') + '" min="0" max="20" placeholder="-" onchange="setMatchScore(' + m.id + ')" style="width:50px;text-align:center;font-size:18px;font-weight:700;padding:4px;border:2px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);">',
     '<span style="font-weight:700;">:</span>',
     '<input type="number" id="match-away-goals" value="' + (m.awayGoals !== null ? m.awayGoals : '') + '" min="0" max="20" placeholder="-" onchange="setMatchScore(' + m.id + ')" style="width:50px;text-align:center;font-size:18px;font-weight:700;padding:4px;border:2px solid var(--border);border-radius:8px;background:var(--bg);color:var(--text);">',
+    '<span style="font-weight:600;">' + (m.isHome ? escHtml(m.opponent) : 'FVH') + '</span>',
     '</div>',
     '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">',
-    '<button class="btn btn-small btn-secondary" style="width:auto;" onclick="shareMatchPoll(' + m.id + ')">📋 Abstimmung kopieren</button>',
     '<button class="btn btn-small btn-secondary" style="width:auto;" data-mi="' + m.id + '" onclick="startPoll(this.dataset.mi,\'spieler\')">📲 Telegram-Umfrage</button>',
-    '<button class="btn btn-small" style="width:auto;background:var(--bg);" onclick="shareWhatsApp(\'' + wts.replace(/'/g, "\\'") + '\')">📱 Info senden</button>',
     '<button class="btn btn-small btn-danger" style="width:auto;" onclick="if(confirm(\'Spiel löschen?\')){deleteMatch(' + m.id + ');closeMatchDetail();}">🗑️ Löschen</button>',
     '</div></div>',
     '<div class="card"><div class="card-title">📋 Aufstellung</div>',
@@ -1942,36 +1926,35 @@ function renderMatchDetail() {
     '</div></div></div>',
     '<div class="card"><div class="card-title" onclick="toggleCollapse(\'ratings\')" style="cursor:pointer;">📊 Match-Bewertung <span style="margin-left:auto;font-size:12px;color:var(--text-secondary);">' + (uiCollapsed.ratings ? '▸' : '▾') + '</span></div>',
     '<div style="display:' + (uiCollapsed.ratings ? 'none' : 'block') + '">',
+    '<div style="font-size:11px;color:var(--text-secondary);margin:6px 0 8px 0;display:flex;gap:12px;flex-wrap:wrap;">'
+    + '<span>💪 Zweikampf</span><span>🧠 Spielverständnis</span><span>🔥 Einsatz</span><span>⚙️ ⚽ = ⌀ daraus</span></div>',
     state.players.filter(function(p) { return m.poll && m.poll[p.id] === 'yes'; }).map(function(p) {
       var r = m.playerRatings && m.playerRatings[p.id];
       var zk = r ? r.zweikampf : 0;
       var sv = r ? r.verstaendnis : 0;
       var e = r ? r.einsatz : 0;
       var vals = [zk, sv, e].filter(function(v) { return v > 0; });
-      var spielAvg = vals.length > 0 ? Math.round(vals.reduce(function(a,b) { return a + b; }, 0) / vals.length * 2) / 2 : 0;
-      var playerKey = 'matchPlayer_' + m.id + '_' + p.id;
+      var spielAvg = vals.length > 0 ? Math.floor(vals.reduce(function(a,b) { return a + b; }, 0) / vals.length * 2) / 2 : 0;
+      var playerKey = 'mpe_' + m.id + '_' + p.id;
+      var isOpen = uiCollapsed[playerKey];
       function starHtml(cat, val) {
         var h = '';
         for (var si = 1; si <= 5; si++) {
           var isFull = val >= si;
-          var isHalf = val >= si - 0.5 && val < si;
-          h += '<span style="display:inline-block;width:1.3em;height:1.3em;position:relative;font-size:15px;vertical-align:middle;">';
-          h += '<span style="position:absolute;inset:0;color:#ccc;font-size:15px;line-height:1.3;">★</span>';
-          if (isFull) h += '<span style="position:absolute;inset:0;color:#FFD700;font-size:15px;line-height:1.3;">★</span>';
-          else if (isHalf) h += '<span style="position:absolute;inset:0;color:#FFD700;font-size:15px;line-height:1.3;width:50%;overflow:hidden;">★</span>';
-          h += '<span style="position:absolute;inset:0;width:50%;cursor:pointer;" onclick="setMatchRating(' + m.id + ',' + p.id + ",'" + cat + "'," + (si - 0.5) + ')"></span>';
-          h += '<span style="position:absolute;inset:0;left:50%;width:50%;cursor:pointer;" onclick="setMatchRating(' + m.id + ',' + p.id + ",'" + cat + "'," + si + ')"></span>';
+          h += '<span style="display:inline-block;width:1.4em;height:1.4em;position:relative;font-size:22px;vertical-align:middle;cursor:pointer;" onclick="setMatchRating(' + m.id + ',' + p.id + ",'" + cat + "'," + si + ')">';
+          h += '<span style="position:absolute;inset:0;color:#ccc;font-size:22px;line-height:1.4;">★</span>';
+          if (isFull) h += '<span style="position:absolute;inset:0;color:#FFD700;font-size:22px;line-height:1.4;">★</span>';
           h += '</span>';
         }
         return h;
       }
       return '<div style="padding:6px 0;border-bottom:1px solid var(--border);">'
-        + '<div style="display:flex;align-items:center;gap:6px;cursor:pointer;" onclick="var k=document.getElementById(\'' + playerKey + '\');k.style.display=k.style.display==\'none\'?\'block\':\'none\';">'
+        + '<div style="display:flex;align-items:center;gap:6px;cursor:pointer;" onclick="toggleCollapse(\'' + playerKey + '\')">'
         + '<span style="font-weight:600;font-size:14px;">' + escHtml(p.name) + '</span>'
         + '<span style="font-size:12px;color:var(--text-secondary);">⚽' + spielAvg + '</span>'
-        + '<span style="margin-left:auto;font-size:11px;color:var(--text-secondary);">▼</span>'
+        + '<span style="margin-left:auto;font-size:11px;color:var(--text-secondary);">' + (isOpen ? '▲' : '▼') + '</span>'
         + '</div>'
-        + '<div id="' + playerKey + '" style="display:none;margin-top:4px;">'
+        + '<div style="display:' + (isOpen ? 'block' : 'none') + ';margin-top:4px;">'
         + '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:4px 0;">'
         + '<span style="font-size:12px;color:var(--text-secondary);">💪</span><span>' + starHtml('zweikampf', zk) + '</span>'
         + '<span style="font-size:12px;color:var(--text-secondary);">🧠</span><span>' + starHtml('verstaendnis', sv) + '</span>'
@@ -2172,6 +2155,12 @@ function getBehavEmoji(pct) {
   if (pct >= 60) return '🙂';
   if (pct > 0) return '☹️';
   return '❓';
+}
+
+function getChangeIcon(cat, prev, curr) {
+  if (prev === undefined || prev === null || prev === curr) return '';
+  var up = curr > prev;
+  return '<span style="color:' + (up ? '#4CAF50' : '#F44336') + ';font-size:11px;">' + (up ? ' ↑' : ' ↓') + '</span>';
 }
 
 function addNewSeason() {
