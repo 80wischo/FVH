@@ -73,7 +73,13 @@ function migrateState() {
   if (!state.settings.seasons) state.settings.seasons = ['25/26', '26/27'];
   if (state.players) {
     state.players.forEach(p => {
-      if (!p.rating) p.rating = { fitness: 3, technique: 3, matchPerf: 3 };
+      if (!p.rating) p.rating = { mental: 3, technique: 3, ausdauer: 3 };
+      else {
+        if (p.rating.fitness !== undefined && p.rating.ausdauer === undefined) p.rating.ausdauer = p.rating.fitness;
+        if (p.rating.matchPerf !== undefined) delete p.rating.matchPerf;
+        if (p.rating.fitness !== undefined) delete p.rating.fitness;
+        if (p.rating.mental === undefined) p.rating.mental = 3;
+      }
     });
   }
   if (state.trainings) {
@@ -85,6 +91,11 @@ function migrateState() {
     state.matches.forEach(m => {
       if (!m.season) m.season = '25/26';
       if (!m.playerRatings) m.playerRatings = {};
+      for (const pid in m.playerRatings) {
+        const r = m.playerRatings[pid];
+        if (r.einsatz === undefined) r.einsatz = 0;
+        if (r.spiel !== undefined) delete r.spiel;
+      }
       if (m.homeGoals === undefined) m.homeGoals = null;
       if (m.awayGoals === undefined) m.awayGoals = null;
       if (m.kader === undefined) m.kader = null;
@@ -212,9 +223,9 @@ function getPlayerAttendancePct(playerId, season) {
 
   for (const t of seasonTrainings) {
     const w = t.date >= cutoffStr ? 3 : 1;
-    weightedDenom += w;
     const a = t.attendance && t.attendance[playerId];
-    if (!a) continue;
+    if (!a) continue; // kein Eintrag = zählt nicht (neue Spieler)
+    weightedDenom += w;
     const status = typeof a === 'string' ? a : (a.status || '');
     if (status === 'yes' || status === 'late') {
       weightedAttended += w;
@@ -280,7 +291,7 @@ function addPlayer() {
 function editPlayer(id) {
   const p = state.players.find(x => x.id === id);
   if (!p) return;
-  const r = p.rating || { fitness: 3, technique: 3, matchPerf: 3 };
+  const r = p.rating || { mental: 3, technique: 3, ausdauer: 3 };
   function stars(cat, val) {
     return [1,2,3,4,5].map(i => `<span style="cursor:pointer;font-size:22px;" onclick="clickRating(${id},'${cat}',${i})">${i <= val ? '⭐' : '☆'}</span>`).join('');
   }
@@ -291,19 +302,20 @@ function editPlayer(id) {
     <label>Trikotnummer</label>
     <input type="number" id="player-number-input" value="${p.number || ''}" min="0" max="99">
     <div style="margin-top:14px;padding-top:12px;border-top:1px solid var(--border);">
-      <div style="font-size:14px;font-weight:600;margin-bottom:8px;">🏃 Bewertung</div>
+      <div style="font-size:14px;font-weight:600;margin-bottom:8px;">📊 Basis-Bewertung</div>
+      <div style="font-size:12px;color:var(--text-secondary);margin-bottom:8px;">1× pro Monat aktualisieren</div>
       <div style="display:flex;flex-direction:column;gap:6px;">
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="width:100px;font-size:13px;">🏃 Fitness</span>
-          <span id="stars-fitness">${stars('fitness', r.fitness)}</span>
+          <span style="width:100px;font-size:13px;">❤️ Mental</span>
+          <span id="stars-mental">${stars('mental', r.mental)}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="width:100px;font-size:13px;">⚽ Technik</span>
+          <span style="width:100px;font-size:13px;">👟 Technik</span>
           <span id="stars-technique">${stars('technique', r.technique)}</span>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
-          <span style="width:100px;font-size:13px;">📊 Match</span>
-          <span id="stars-matchPerf">${stars('matchPerf', r.matchPerf)}</span>
+          <span style="width:100px;font-size:13px;">🏃 Ausdauer</span>
+          <span id="stars-ausdauer">${stars('ausdauer', r.ausdauer)}</span>
         </div>
       </div>
     </div>
@@ -317,8 +329,9 @@ function editPlayer(id) {
 function clickRating(playerId, cat, val) {
   const p = state.players.find(x => x.id === playerId);
   if (!p) return;
-  if (!p.rating) p.rating = { fitness: 3, technique: 3, matchPerf: 3 };
+  if (!p.rating) p.rating = { mental: 3, technique: 3, ausdauer: 3 };
   p.rating[cat] = val;
+  p.rating.updatedAt = Date.now();
   saveState();
   const el = document.getElementById('stars-' + cat);
   if (el) {
@@ -341,9 +354,9 @@ function savePlayer(editId) {
 
   if (editId) {
     const p = state.players.find(x => x.id === editId);
-    if (p) { p.name = name; p.number = num; if (!p.rating) p.rating = { fitness: 3, technique: 3, matchPerf: 3 }; }
+    if (p) { p.name = name; p.number = num; if (!p.rating) p.rating = { mental: 3, technique: 3, ausdauer: 3 }; }
   } else {
-    state.players.push({ id: Date.now(), name, number: num, active: true, rating: { fitness: 3, technique: 3, matchPerf: 3 } });
+    state.players.push({ id: Date.now(), name, number: num, active: true, rating: { mental: 3, technique: 3, ausdauer: 3 } });
   }
   saveState();
   document.querySelector('.modal-overlay')?.remove();
@@ -729,7 +742,7 @@ let selectedMatchId = null;
 let selectedTrainingId = null;
 let historyExpandedId = null;
 let selectedFormationPos = null;
-let uiCollapsed = {};
+let uiCollapsed = { activities: true };
 
 function addMatch() {
   const modal = showModal(`
@@ -879,7 +892,7 @@ function setMatchRating(matchId, playerId, cat, val) {
   const m = state.matches.find(x => x.id === matchId);
   if (!m) return;
   if (!m.playerRatings) m.playerRatings = {};
-  if (!m.playerRatings[playerId]) m.playerRatings[playerId] = { spiel: 0, zweikampf: 0, verstaendnis: 0 };
+  if (!m.playerRatings[playerId]) m.playerRatings[playerId] = { zweikampf: 0, verstaendnis: 0, einsatz: 0 };
   m.playerRatings[playerId][cat] = val;
   saveState();
   render();
@@ -893,7 +906,22 @@ function getPlayerMatchAvg(playerId, cat) {
   }
   if (ratings.length === 0) return 0;
   const avg = ratings.reduce((a,b) => a + b, 0) / ratings.length;
-  return Math.round(avg * 2) / 2; // round to nearest 0.5
+  return Math.round(avg * 2) / 2;
+}
+
+function getPlayerSpielAvg(playerId) {
+  const ratings = [];
+  for (const m of getSeasonMatches()) {
+    const r = m.playerRatings && m.playerRatings[playerId];
+    if (r) {
+      const vals = [r.zweikampf || 0, r.verstaendnis || 0, r.einsatz || 0];
+      const valid = vals.filter(v => v > 0);
+      if (valid.length > 0) ratings.push(valid.reduce((a,b) => a + b, 0) / valid.length);
+    }
+  }
+  if (ratings.length === 0) return 0;
+  const avg = ratings.reduce((a,b) => a + b, 0) / ratings.length;
+  return Math.round(avg * 2) / 2;
 }
 
 // ─── Kader für Telegram-Umfrage ────────────────────────────
@@ -1374,13 +1402,12 @@ function renderDashboard() {
   perPlayerStats.forEach(function(p, i) {
     var medal = i < 3 ? ['🥇','🥈','🥉'][i] : '';
     var ampColor = p.pct >= 75 ? '🟢' : p.pct >= 55 ? '🟡' : '🔴';
-    var nameColor = i === 0 ? '#D4A017' : i === 1 ? '#8C8C8C' : i === 2 ? '#CD7F32' : '';
     var num = (i+1) + '.';
-    html.push('<div style="font-size:12px;' + (nameColor ? 'color:' + nameColor + ';' : '') + 'display:flex;align-items:center;gap:2px;">');
+    html.push('<div style="font-size:14px;display:flex;align-items:center;gap:2px;">');
     html.push('<span style="width:22px;text-align:right;flex-shrink:0;">' + medal + '</span>');
     html.push('<span style="width:24px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;">' + num + '</span>');
     html.push('<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(p.name) + '</span>');
-    html.push('<span style="font-weight:600;flex-shrink:0;font-variant-numeric:tabular-nums;">' + p.pct + '%</span>');
+    html.push('<span style="flex-shrink:0;font-variant-numeric:tabular-nums;">' + p.pct + '%</span>');
     html.push('<span style="flex-shrink:0;">' + ampColor + '</span>');
     html.push('</div>');
   });
@@ -1394,13 +1421,12 @@ function renderDashboard() {
   behavPlayers.forEach(function(p, i) {
     var medal = i < 3 ? ['🥇','🥈','🥉'][i] : '';
     var ampColor = p.behavPct >= 75 ? '🟢' : p.behavPct >= 55 ? '🟡' : '🔴';
-    var nameColor = i === 0 ? '#D4A017' : i === 1 ? '#8C8C8C' : i === 2 ? '#CD7F32' : '';
     var num = (i+1) + '.';
-    html.push('<div style="font-size:12px;' + (nameColor ? 'color:' + nameColor + ';' : '') + 'display:flex;align-items:center;gap:2px;">');
+    html.push('<div style="font-size:14px;display:flex;align-items:center;gap:2px;">');
     html.push('<span style="width:22px;text-align:right;flex-shrink:0;">' + medal + '</span>');
     html.push('<span style="width:24px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums;">' + num + '</span>');
     html.push('<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + escHtml(p.name) + '</span>');
-    html.push('<span style="font-weight:600;flex-shrink:0;font-variant-numeric:tabular-nums;">' + p.behavPct + '%</span>');
+    html.push('<span style="flex-shrink:0;font-variant-numeric:tabular-nums;">' + p.behavPct + '%</span>');
     html.push('<span style="flex-shrink:0;">' + ampColor + '</span>');
     html.push('</div>');
   });
@@ -1435,6 +1461,40 @@ function renderDashboard() {
     html.push('</div></div>');
   }
 
+  // ─── Monats-Erinnerung ──────────────────────────────────
+  var todayMs = Date.now();
+  var monthMs = 30 * 24 * 60 * 60 * 1000;
+  var anyOutdated = false;
+  for (var pi = 0; pi < state.players.length; pi++) {
+    var r = state.players[pi].rating;
+    if (!r || !r.updatedAt || (todayMs - r.updatedAt) > monthMs) { anyOutdated = true; break; }
+  }
+  if (anyOutdated && state.players.length > 0) {
+    html.push('<div class="card" style="border-left:4px solid #FF9800;">');
+    html.push('<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">');
+    html.push('<span style="font-size:20px;">📅</span>');
+    html.push('<div><div style="font-weight:600;font-size:14px;">Monats-Ratings fällig</div>');
+    html.push('<div style="font-size:12px;color:var(--text-secondary);">❤️ 👟 🏃 diesen Monat noch nicht aktualisiert</div></div>');
+    html.push('<button class="btn btn-small btn-primary" style="margin-left:auto;width:auto;" onclick="navigate(\'players\')">Jetzt bewerten</button>');
+    html.push('</div></div>');
+  }
+
+  // ─── Match-Erinnerung ────────────────────────────────────
+  var today = todayStr();
+  for (var mi = 0; mi < state.matches.length; mi++) {
+    var match = state.matches[mi];
+    if (match.date < today && (!match.playerRatings || Object.values(match.playerRatings).every(function(r) { return !r || r.einsatz === 0; }))) {
+      html.push('<div class="card" style="border-left:4px solid #F44336;">');
+      html.push('<div style="display:flex;align-items:center;gap:8px;padding:4px 0;">');
+      html.push('<span style="font-size:20px;">⚽</span>');
+      html.push('<div><div style="font-weight:600;font-size:14px;">Spiel nicht bewertet</div>');
+      html.push('<div style="font-size:12px;color:var(--text-secondary);">vs ' + escHtml(match.opponent) + ' (' + formatDate(match.date) + ')</div></div>');
+      html.push('<button class="btn btn-small btn-danger" style="margin-left:auto;width:auto;" onclick="openMatchDetail(' + match.id + ')">Jetzt bewerten</button>');
+      html.push('</div></div>');
+      break;
+    }
+  }
+
   html.push('<div class="card"><div class="card-title">🌤️ Wetter am Platz</div><div id="weather-content" class="weather-card"><div class="loading">Wetter wird geladen...</div></div></div>');
 
   content.innerHTML = html.join('');
@@ -1463,55 +1523,78 @@ function renderPlayers() {
       <button class="btn btn-small btn-primary" onclick="addPlayer()">+ Hinzufügen</button>
     </div>
     <div id="player-list">
-      ${state.players.map(p => {
+      ${[...state.players].sort((a,b) => getPlayerAttendancePct(b.id) - getPlayerAttendancePct(a.id)).map(p => {
         const attPct = getPlayerAttendancePct(p.id);
         const behavPct = getPlayerBehaviorPct(p.id);
-        const r = p.rating || { fitness: 3, technique: 3, matchPerf: 3 };
-        const matchSpiel = getPlayerMatchAvg(p.id, 'spiel');
+        const r = p.rating || { mental: 3, technique: 3, ausdauer: 3 };
+        const matchSpiel = getPlayerSpielAvg(p.id);
         const matchZk = getPlayerMatchAvg(p.id, 'zweikampf');
         const matchSv = getPlayerMatchAvg(p.id, 'verstaendnis');
+        const matchEinsatz = getPlayerMatchAvg(p.id, 'einsatz');
         const isExpanded = playerExpanded[p.id];
-        const matchCount = seasonMatches.filter(m => m.playerRatings && m.playerRatings[p.id] && m.playerRatings[p.id].spiel > 0).length;
+        const matchCount = seasonMatches.filter(m => m.playerRatings && m.playerRatings[p.id] && (m.playerRatings[p.id].einsatz || 0) > 0).length;
         const playerMatches = seasonMatches.filter(m => m.poll && m.poll[p.id] === 'yes').sort((a,b) => b.date.localeCompare(a.date));
-        const playerTrainings = seasonTrainings.filter(t => t.attendance && t.attendance[p.id]).sort((a,b) => b.date.localeCompare(a.date)).slice(0, 15);
         return `
           <div style="margin-bottom:8px;">
             <div class="player-card" style="cursor:pointer;position:relative;" onclick="togglePlayerStats(${p.id})">
               <div class="player-avatar">${p.name.charAt(0)}</div>
               <div class="player-info">
                 <div class="player-name">${escHtml(p.name)}</div>
-                <div class="player-number">${p.number ? '#' + p.number : ''} · ${attPct}% · 😊 ${behavPct}% · 🏃${r.fitness}⚽${r.technique}</div>
+                <div class="player-number"><span style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:${attPct >= 75 ? '#4CAF50' : attPct >= 55 ? '#FF9800' : '#F44336'};color:#fff;font-size:10px;font-weight:700;line-height:1;">✓</span> ${attPct}% · ${getBehavEmoji(behavPct)}${behavPct}% · ⚽${matchSpiel} ❤️${r.mental} 👟${r.technique} 🏃${r.ausdauer}</div>
               </div>
               <div style="position:absolute;top:12px;right:12px;font-size:12px;color:var(--text-secondary);">${isExpanded ? '▲' : '▼'}</div>
             </div>
             ${isExpanded ? `
               <div style="background:var(--bg);border:1px solid var(--border);border-top:none;border-radius:0 0 12px 12px;padding:12px;font-size:13px;">
-                <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
-                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">⚽ Spiel ⌀ ${matchSpiel > 0 ? matchSpiel : '-'}</span>
-                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">💪 Zweikampf ⌀ ${matchZk > 0 ? matchZk : '-'}</span>
-                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">🧠 Verständnis ⌀ ${matchSv > 0 ? matchSv : '-'}</span>
-                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">🏃 Fitness ${r.fitness}</span>
-                  <span style="background:var(--card-bg);padding:4px 10px;border-radius:8px;">⚽ Technik ${r.technique}</span>
-                </div>
-                ${playerTrainings.length > 0 ? `
-                  <div style="font-weight:600;margin-bottom:4px;">⚽ Training (${seasonTrainings.length} gesamt)</div>
-                  ${playerTrainings.map(t => {
-                    const a = t.attendance[p.id];
-                    const status = a ? (a.status || '') : '';
-                    const behav = a && a.behavior ? a.behavior : '';
-                    const statusEmoji = status === 'yes' ? '✅' : status === 'late' ? '⏰' : '❌';
-                    const behavEmoji = behav === 'good' ? '😊' : behav === 'ok' ? '🙂' : behav === 'bad' ? '☹️' : '';
-                    return '<div style="display:flex;gap:6px;padding:3px 0;font-size:12px;color:var(--text-secondary);"><span>' + formatDateLong(t.date).split(',')[0] + '</span><span>' + statusEmoji + '</span>' + (behavEmoji ? '<span>' + behavEmoji + '</span>' : '') + '</div>';
-                  }).join('')}
-                ` : '<div style="font-size:12px;color:var(--text-secondary);">Keine Trainings in dieser Saison</div>'}
-                ${playerMatches.length > 0 ? `
-                  <div style="font-weight:600;margin-top:10px;margin-bottom:4px;">📊 Spiele (${matchCount} bewertet)</div>
-                  ${playerMatches.map(m => {
-                    const r2 = m.playerRatings && m.playerRatings[p.id];
-                    const ratingsStr = r2 ? '⚽' + (r2.spiel||'-') + ' 💪' + (r2.zweikampf||'-') + ' 🧠' + (r2.verstaendnis||'-') : 'keine Bewertung';
-                    return '<div style="display:flex;gap:6px;padding:3px 0;font-size:12px;color:var(--text-secondary);"><span>' + formatDate(m.date) + '</span><span>vs ' + escHtml(m.opponent) + '</span><span>' + ratingsStr + '</span></div>';
-                  }).join('')}
-                ` : ''}
+                ${seasonTrainings.length > 0 ? (function() {
+                  var totalYes = 0, totalLate = 0, totalNo = 0;
+                  var behavGood = 0, behavOk = 0, behavBad = 0, behavTotal = 0;
+                  seasonTrainings.forEach(function(t) {
+                    var a = t.attendance && t.attendance[p.id];
+                    if (!a) return;
+                    var s = a.status || '';
+                    if (s === 'yes') totalYes++;
+                    else if (s === 'late') totalLate++;
+                    else if (s === 'no') totalNo++;
+                    var b = a.behavior || '';
+                    if (b) { behavTotal++; if (b === 'good') behavGood++; else if (b === 'ok') behavOk++; else if (b === 'bad') behavBad++; }
+                  });
+                  var totalAtt = totalYes + totalLate + totalNo;
+                  var attPctRaw = totalAtt > 0 ? Math.round((totalYes + totalLate) / totalAtt * 100) : 0;
+                  var bpG = behavTotal > 0 ? Math.round(behavGood / behavTotal * 100) : 0;
+                  var bpO = behavTotal > 0 ? Math.round(behavOk / behavTotal * 100) : 0;
+                  var bpB = behavTotal > 0 ? Math.round(behavBad / behavTotal * 100) : 0;
+                   return '<div style="display:flex;font-weight:600;margin-bottom:4px;font-size:14px;align-items:center;"><span>⚽ Training</span><span style="flex:1;min-width:8px;"></span><span style="font-weight:400;font-size:13px;color:var(--text-secondary);white-space:nowrap;">✅' + (totalYes + totalLate) + '  ⏰' + totalLate + '  ❌' + totalNo + (behavTotal > 0 ? '  😊' + behavGood + '🙂' + behavOk + '☹️' + behavBad : '') + '</span></div>';
+                })() : '<div style="font-size:12px;color:var(--text-secondary);">Keine Trainings in dieser Saison</div>'}
+                ${playerMatches.length > 0 ? (function() {
+                  var playerMatchKey = 'playerMatchList_' + p.id;
+                  if (uiCollapsed[playerMatchKey] === undefined) uiCollapsed[playerMatchKey] = false;
+                  var mHtml = '<div style="display:flex;font-weight:600;margin-top:12px;margin-bottom:4px;cursor:pointer;align-items:center;" onclick="toggleCollapse(\'' + playerMatchKey + '\')"><span>📊 Ø Spiele (' + matchCount + ' bewertet)</span><span style="flex:1;min-width:8px;"></span>'
+                    + (matchSpiel > 0 ? '<span style="font-weight:400;font-size:12px;color:var(--text-secondary);white-space:nowrap;">⚽' + matchSpiel + '  💪' + matchZk + '  🧠' + matchSv + '  🔥' + matchEinsatz + '</span>' : '')
+                    + ' <span style="font-size:12px;color:var(--text-secondary);flex-shrink:0;">' + (uiCollapsed[playerMatchKey] ? '▸' : '▾') + '</span></div>';
+                  mHtml += '<div style="display:' + (uiCollapsed[playerMatchKey] ? 'none' : 'block') + '">';
+                  mHtml += '<div style="display:table;font-size:12px;color:var(--text-secondary);">';
+                  playerMatches.forEach(function(m) {
+                    var r2 = m.playerRatings && m.playerRatings[p.id];
+                    var z = r2 ? r2.zweikampf||0 : 0;
+                    var sv = r2 ? r2.verstaendnis||0 : 0;
+                    var e = r2 ? r2.einsatz||0 : 0;
+                    var vals = [z, sv, e].filter(function(v) { return v > 0; });
+                    var spielAvg = vals.length > 0 ? Math.round(vals.reduce(function(a,b) { return a + b; }, 0) / vals.length * 2) / 2 : '-';
+                    mHtml += '<div style="display:table-row;">'
+                      + '<span style="display:table-cell;padding:1px 2px 1px 0;">⚽' + spielAvg + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">💪' + z + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">🧠' + sv + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">🔥' + e + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;padding-left:8px;">' + formatDate(m.date) + '</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">vs</span>'
+                      + '<span style="display:table-cell;padding:1px 2px;">' + escHtml(m.opponent) + '</span>'
+                      + '</div>';
+                  });
+                  mHtml += '</div>';
+                  mHtml += '</div>';
+                  return mHtml;
+                })() : ''}
                 <div style="display:flex;gap:8px;margin-top:10px;">
                   <button class="btn btn-small btn-primary" onclick="event.stopPropagation();editPlayer(${p.id})">✏️ Bearbeiten</button>
                   <button class="btn btn-small btn-danger" onclick="event.stopPropagation();deletePlayer(${p.id})">🗑️ Löschen</button>
@@ -1527,6 +1610,9 @@ function renderPlayers() {
 
 function togglePlayerStats(id) {
   playerExpanded[id] = !playerExpanded[id];
+  if (playerExpanded[id] && uiCollapsed['playerMatchList_' + id] === undefined) {
+    uiCollapsed['playerMatchList_' + id] = true;
+  }
   render();
 }
 
@@ -1555,18 +1641,19 @@ function renderTraining() {
       const playerStats = state.players.map(p => {
         const attPct = getPlayerAttendancePct(p.id);
         const behavPct = getPlayerBehaviorPct(p.id);
-        const rating = p.rating || { fitness: 3, technique: 3, matchPerf: 3 };
-        const matchSpiel = getPlayerMatchAvg(p.id, 'spiel');
+        const rating = p.rating || { mental: 3, technique: 3, ausdauer: 3 };
+        const matchSpiel = getPlayerSpielAvg(p.id);
         const matchZk = getPlayerMatchAvg(p.id, 'zweikampf');
         const matchSv = getPlayerMatchAvg(p.id, 'verstaendnis');
-        const ratingSum = rating.fitness + rating.technique + matchSpiel + matchZk + matchSv;
+        const matchEinsatz = getPlayerMatchAvg(p.id, 'einsatz');
+        const ratingSum = rating.mental + rating.technique + rating.ausdauer + matchSpiel;
         const weekAtt = weekTrainings.map(t => {
           const a = t.attendance && t.attendance[p.id];
           const status = a ? (typeof a === 'string' ? a : (a.status || '')) : '';
           return status === 'yes' || status === 'late' ? '✅' : '❌';
         });
         const weekText = weekTrainingDates.map((d, i) => formatDate(d).split(',')[0] + weekAtt[i]).join(' ');
-        return { id: p.id, name: p.name, attPct, behavPct, rating, matchSpiel, matchZk, matchSv, weekText, sortKey: -(attPct * 10000 + behavPct * 100 + ratingSum) };
+        return { id: p.id, name: p.name, attPct, behavPct, rating, matchSpiel, matchZk, matchSv, matchEinsatz, weekText, sortKey: -(attPct * 10000 + behavPct * 100 + ratingSum) };
       });
       playerStats.sort((a, b) => a.sortKey - b.sortKey);
 
@@ -1597,12 +1684,11 @@ function renderTraining() {
                 <span style="font-weight:600;width:38px;text-align:right;flex-shrink:0;">${ps.attPct}%</span>
                 <span style="width:16px;text-align:center;flex-shrink:0;">${ampLabel}</span>
                 <span style="font-size:11px;color:var(--text-secondary);flex-shrink:0;white-space:nowrap;display:inline-flex;align-items:center;width:46px;">
-                  <span style="width:14px;text-align:center;">😊</span>
+                  <span style="width:14px;text-align:center;">${getBehavEmoji(ps.behavPct)}</span>
                   <span style="width:30px;text-align:right;">${ps.behavPct}%</span>
                 </span>
-                <span style="font-size:10px;color:var(--text-secondary);flex-shrink:0;white-space:nowrap;letter-spacing:-0.5px;">
-                  🏃${ps.rating.fitness}⚽${ps.rating.technique}
-                  ${ps.matchSpiel > 0 ? `⚽${ps.matchSpiel}💪${ps.matchZk}🧠${ps.matchSv}` : '⚽-💪-🧠-'}
+                <span style="font-size:10px;color:var(--text-secondary);flex-shrink:0;white-space:nowrap;">
+                  ⚽${ps.matchSpiel} ❤️${ps.rating.mental} 👟${ps.rating.technique} 🏃${ps.rating.ausdauer}
                 </span>
                 <span style="font-size:11px;color:var(--text-secondary);flex-shrink:0;white-space:nowrap;">· ${ps.weekText}</span>
               </div>
@@ -1858,9 +1944,12 @@ function renderMatchDetail() {
     '<div style="display:' + (uiCollapsed.ratings ? 'none' : 'block') + '">',
     state.players.filter(function(p) { return m.poll && m.poll[p.id] === 'yes'; }).map(function(p) {
       var r = m.playerRatings && m.playerRatings[p.id];
-      var spiel = r ? r.spiel : 0;
       var zk = r ? r.zweikampf : 0;
       var sv = r ? r.verstaendnis : 0;
+      var e = r ? r.einsatz : 0;
+      var vals = [zk, sv, e].filter(function(v) { return v > 0; });
+      var spielAvg = vals.length > 0 ? Math.round(vals.reduce(function(a,b) { return a + b; }, 0) / vals.length * 2) / 2 : 0;
+      var playerKey = 'matchPlayer_' + m.id + '_' + p.id;
       function starHtml(cat, val) {
         var h = '';
         for (var si = 1; si <= 5; si++) {
@@ -1876,13 +1965,18 @@ function renderMatchDetail() {
         }
         return h;
       }
-      return '<div style="padding:8px 0;border-bottom:1px solid var(--border);">'
-        + '<div style="font-weight:600;font-size:14px;margin-bottom:4px;">' + escHtml(p.name) + '</div>'
-        + '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;">'
-        + '<span style="font-size:12px;color:var(--text-secondary);">⚽</span><span>' + starHtml('spiel', spiel) + '</span>'
+      return '<div style="padding:6px 0;border-bottom:1px solid var(--border);">'
+        + '<div style="display:flex;align-items:center;gap:6px;cursor:pointer;" onclick="var k=document.getElementById(\'' + playerKey + '\');k.style.display=k.style.display==\'none\'?\'block\':\'none\';">'
+        + '<span style="font-weight:600;font-size:14px;">' + escHtml(p.name) + '</span>'
+        + '<span style="font-size:12px;color:var(--text-secondary);">⚽' + spielAvg + '</span>'
+        + '<span style="margin-left:auto;font-size:11px;color:var(--text-secondary);">▼</span>'
+        + '</div>'
+        + '<div id="' + playerKey + '" style="display:none;margin-top:4px;">'
+        + '<div style="display:flex;flex-wrap:wrap;gap:4px;align-items:center;padding:4px 0;">'
         + '<span style="font-size:12px;color:var(--text-secondary);">💪</span><span>' + starHtml('zweikampf', zk) + '</span>'
         + '<span style="font-size:12px;color:var(--text-secondary);">🧠</span><span>' + starHtml('verstaendnis', sv) + '</span>'
-        + '</div></div>';
+        + '<span style="font-size:12px;color:var(--text-secondary);">🔥</span><span>' + starHtml('einsatz', e) + '</span>'
+        + '</div></div></div>';
     }).join(''),
     '</div></div>',
     '<div style="margin-bottom:16px;"><div class="card-title" onclick="toggleCollapse(\'helpers\')" style="cursor:pointer;">🔧 Helfer-Aufgaben <span style="margin-left:auto;font-size:12px;color:var(--text-secondary);">' + (uiCollapsed.helpers ? '▸' : '▾') + '</span></div><div style="display:' + (uiCollapsed.helpers ? 'none' : 'block') + '">' + renderMatchTasks(m) + '</div></div>'
@@ -2071,6 +2165,13 @@ function switchSeason(season) {
   state.settings.season = season;
   saveState();
   render();
+}
+
+function getBehavEmoji(pct) {
+  if (pct >= 80) return '😊';
+  if (pct >= 60) return '🙂';
+  if (pct > 0) return '☹️';
+  return '❓';
 }
 
 function addNewSeason() {

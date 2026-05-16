@@ -34,34 +34,34 @@
     'Quentin':  [0.40, 0.35, 0.25]
   };
 
-  // Bewertungen [fitness, technique] 1-5
+  // Bewertungen [mental, technique, ausdauer] 1-5
   const RATING_PROFILES = {
-    'Miko':     [5, 5],
-    'Simon':    [5, 4],
-    'Liam':     [4, 5],
-    'Max':      [4, 4],
-    'Ajan':     [4, 3],
-    'Jasper':   [3, 4],
-    'Jannis':   [3, 3],
-    'Kuba':     [3, 2],
-    'Periklis': [2, 3],
-    'Adriel':   [2, 2],
-    'Quentin':  [2, 2]
+    'Miko':     [5, 5, 5],
+    'Simon':    [5, 4, 5],
+    'Liam':     [4, 5, 4],
+    'Max':      [4, 4, 4],
+    'Ajan':     [4, 3, 4],
+    'Jasper':   [3, 4, 3],
+    'Jannis':   [3, 3, 3],
+    'Kuba':     [3, 2, 3],
+    'Periklis': [2, 3, 2],
+    'Adriel':   [2, 2, 2],
+    'Quentin':  [2, 2, 2]
   };
 
-  // Match-Spielstärke (spiel, zweikampf, verstaendnis) – pro Spieler
+  // Match-Spielstärke (zweikampf, verstaendnis, einsatz) – pro Spieler
   const MATCH_SKILL = {
-    'Miko':     [4.6, 4.3, 4.8],
-    'Simon':    [4.5, 4.7, 4.3],
-    'Liam':     [4.8, 4.2, 4.6],
-    'Max':      [3.8, 4.0, 3.7],
-    'Ajan':     [3.7, 3.5, 3.8],
-    'Jasper':   [3.5, 3.8, 3.5],
-    'Jannis':   [3.3, 3.5, 3.3],
-    'Kuba':     [2.8, 3.0, 2.7],
-    'Periklis': [2.7, 2.5, 2.8],
-    'Adriel':   [2.3, 2.5, 2.3],
-    'Quentin':  [2.5, 2.3, 2.5]
+    'Miko':     [4.3, 4.8, 4.5],
+    'Simon':    [4.7, 4.3, 4.5],
+    'Liam':     [4.2, 4.6, 4.3],
+    'Max':      [4.0, 3.7, 3.8],
+    'Ajan':     [3.5, 3.8, 3.7],
+    'Jasper':   [3.8, 3.5, 3.5],
+    'Jannis':   [3.5, 3.3, 3.3],
+    'Kuba':     [3.0, 2.7, 2.8],
+    'Periklis': [2.5, 2.8, 2.5],
+    'Adriel':   [2.5, 2.3, 2.3],
+    'Quentin':  [2.3, 2.5, 2.5]
   };
 
   const GEGNER = [
@@ -100,10 +100,10 @@
     const v = [0,0,0];
     for (let i = 0; i < 3; i++) {
       let val = base[i] + (rand() - 0.5) * 1.0;
-      val = Math.max(1, Math.min(5, Math.round(val)));
+      val = Math.max(1, Math.min(5, Math.round(val * 2) / 2));
       v[i] = val;
     }
-    return { spiel: v[0], zweikampf: v[1], verstaendnis: v[2] };
+    return { zweikampf: v[0], verstaendnis: v[1], einsatz: v[2] };
   }
 
   window.seedSeason24_25 = function() {
@@ -123,11 +123,11 @@
       if (existing) {
         nameToId[PLAYER_NAMES[i]] = existing.id;
         const rp = RATING_PROFILES[PLAYER_NAMES[i]];
-        if (!existing.rating) existing.rating = { fitness: rp[0], technique: rp[1], matchPerf: 3 };
+      if (!existing.rating) existing.rating = { mental: rp[0], technique: rp[1], ausdauer: rp[2] };
       } else {
         const rp = RATING_PROFILES[PLAYER_NAMES[i]];
         const newId = nextId++;
-        state.players.push({ id: newId, name: PLAYER_NAMES[i], number: i+1, active: true, rating: { fitness: rp[0], technique: rp[1], matchPerf: 3 } });
+        state.players.push({ id: newId, name: PLAYER_NAMES[i], number: i+1, active: true, rating: { mental: rp[0], technique: rp[1], ausdauer: rp[2] } });
         nameToId[PLAYER_NAMES[i]] = newId;
       }
     }
