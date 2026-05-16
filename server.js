@@ -51,6 +51,7 @@ function initBot() {
     bot.on('message', (msg) => {
       if (msg.text === '/start') {
         const chatId = msg.chat.id;
+        saveTelegramGroupId(chatId);
         bot.sendMessage(chatId,
           '⚽ FVH D-Jugend Bot aktiv!\n\n' +
           'Dieser Bot wird vom FVH D-Jugend Manager gesteuert.\n' +
@@ -161,7 +162,7 @@ app.post('/api/poll/create', async (req, res) => {
   try {
     const msg = await bot.sendPoll(groupId, question, options, {
       is_anonymous: false,
-      allows_multiple_answers: type !== 'spieler',
+      allows_multiple_answers: true,
       open_period: 86400 // 24 Stunden
     });
 

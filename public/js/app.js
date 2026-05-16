@@ -7,7 +7,7 @@ const DEFAULT_STATE = {
     trainingDays: ['Di', 'Do'],
     trainingTime: '17:00',
     trainingTimeEnd: '18:30',
-    trainingLocation: 'Sportplatz FVH',
+    trainingLocation: 'FVH',
     trainingExceptions: [],
     useWeather: true,
     season: '26/27',
@@ -85,6 +85,8 @@ function migrateState() {
   if (state.trainings) {
     state.trainings.forEach(t => {
       if (!t.season) t.season = '25/26';
+      if (t.time === undefined) t.time = state.settings.trainingTime || '17:00';
+      if (t.timeEnd === undefined) t.timeEnd = state.settings.trainingTimeEnd || '18:30';
     });
   }
   if (state.matches) {
@@ -404,7 +406,7 @@ function navigateToTrainingDate(date) {
   }
   let existing = state.trainings.find(t => t.date === date);
   if (!existing) {
-    existing = { id: Date.now(), date, attendance: {} };
+    existing = { id: Date.now(), date, attendance: {}, time: state.settings.trainingTime || '17:00', timeEnd: state.settings.trainingTimeEnd || '18:30', season: state.settings.season };
     state.trainings.push(existing);
   }
   state.trainingActive = true;
@@ -419,7 +421,7 @@ function createPastTraining() {
   if (!date) return;
   if (date > todayStr()) { alert('Das Datum liegt in der Zukunft.'); return; }
   if (state.trainings.find(t => t.date === date)) { alert('Training für dieses Datum existiert bereits.'); document.querySelector('.modal-overlay')?.remove(); return; }
-  state.trainings.push({ id: Date.now(), date, attendance: {} });
+  state.trainings.push({ id: Date.now(), date, attendance: {}, time: state.settings.trainingTime || '17:00', timeEnd: state.settings.trainingTimeEnd || '18:30', season: state.settings.season });
   state.trainingActive = true;
   state.trainingDate = date;
   currentTrainingAttendance = {};
@@ -439,6 +441,9 @@ function startTraining() {
     state.trainingActive = true;
     state.trainingDate = today;
     currentTrainingAttendance = {};
+    if (!existing) {
+      state.trainings.push({ id: Date.now(), date: today, attendance: {}, time: state.settings.trainingTime || '17:00', timeEnd: state.settings.trainingTimeEnd || '18:30', season: state.settings.season });
+    }
   }
   saveState();
   navigate('training');
@@ -922,7 +927,7 @@ function sendKaderPoll() {
 // ─── Telegram Poll Integration ─────────────────────────────
 async function apiFetch(url, opts) {
   try {
-    const r = await fetch('http://localhost:3000' + url, opts);
+    const r = await fetch(url, opts);
     return await r.json();
   } catch (e) {
     console.error('API Error:', e);
@@ -963,6 +968,9 @@ async function startPoll(matchId, type) {
   } else {
     alert('✅ Umfrage gesendet!');
     if (!m.poll) m.poll = {};
+    if (result.poll_id) m.pollId = result.poll_id;
+    if (result.message_id) m.pollMessageId = result.message_id;
+    saveState();
     render();
   }
 }
@@ -970,6 +978,27 @@ async function startPoll(matchId, type) {
 async function fetchPollResults(matchId) {
   const results = await apiFetch('/api/poll/results/' + matchId);
   return results;
+}
+
+async function loadPollResults(matchId) {
+  const m = state.matches.find(x => x.id === matchId);
+  if (!m) return;
+  const results = await fetchPollResults(matchId);
+  if (!results || results.length === 0) return alert('Keine Umfrage-Ergebnisse gefunden.');
+  for (const poll of results) {
+    for (const playerName in poll.votes) {
+      const voters = poll.votes[playerName];
+      const cleanName = playerName.replace(/^[☐✅❌❓]\s*/, '').trim();
+      const player = state.players.find(p => p.name === cleanName);
+      if (player) {
+        if (voters.length > 0) m.poll[player.id] = 'yes';
+        else m.poll[player.id] = 'no';
+      }
+    }
+  }
+  saveState();
+  render();
+  alert('✅ Ergebnisse geladen!');
 }
 
 function setMatchFormation(matchId, formationName) {
@@ -1287,7 +1316,7 @@ function renderDashboard() {
   // Trainings der Woche (nur heute & Zukunft)
   for (var d = new Date(weekStart); d <= weekEnd; d.setDate(d.getDate() + 1)) {
     var dateStr = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
-    if (dateStr >= today && isTrainingScheduled(dateStr)) {
+    if (dateStr >= today && (isTrainingScheduled(dateStr) || state.trainings.some(function(t) { return t.date === dateStr; }))) {
       weekEvents.push({ date: dateStr, type: 'training', time: state.settings.trainingTime || '17:00', timeEnd: state.settings.trainingTimeEnd || '18:30' });
     }
   }
@@ -1332,7 +1361,7 @@ function renderDashboard() {
       if (e.type === 'training') {
         html.push('<div class="match-card" style="border-left-color:var(--success);margin-bottom:4px;">');
         html.push('<div class="match-date">' + formatDateLong(e.date) + '</div>');
-        html.push('<div>⚽ Training ' + e.time + ' – ' + e.timeEnd + ' Uhr · 📍 ' + escHtml(state.settings.trainingLocation || 'Sportplatz FVH') + '</div>');
+        html.push('<div>⚽ Training ' + e.time + ' – ' + e.timeEnd + ' Uhr · 📍 ' + escHtml(state.settings.trainingLocation || 'FVH') + '</div>');
         html.push('</div>');
       } else {
         var m = e.data;
@@ -1704,7 +1733,7 @@ function renderTraining() {
 
     content.innerHTML = `
       <div class="card">
-        <div class="card-title">⚽ Heutiges Training</div>
+        <div class="card-title">⚽ ${isTrainingScheduled(today) || state.trainings.find(t => t.date === today) ? `Heutiges Training · ${formatDateLong(today)} · ${state.settings.trainingTime || '17:00'} Uhr · 📍 ${escHtml(state.settings.trainingLocation || 'FVH')}` : 'Heutiges Training'}</div>
         <button class="btn btn-primary" onclick="startTraining()" style="margin-bottom:8px;">Training starten</button>
         <button class="btn btn-secondary btn-small" onclick="startPastTraining()">Training für vergangenes Datum hinzufügen</button>
       </div>
@@ -1713,7 +1742,8 @@ function renderTraining() {
 
       ${recentTrainings.length > 0 ? `
         <div class="card">
-          <div class="card-title">📋 Vergangene Trainingseinheiten</div>
+          <div class="card-title" onclick="toggleCollapse('pastTrainings')" style="cursor:pointer;">📋 Vergangene Trainingseinheiten <span style="margin-left:auto;font-size:12px;color:var(--text-secondary);">${uiCollapsed.pastTrainings ? '▸' : '▾'}</span></div>
+          <div style="display:${uiCollapsed.pastTrainings ? 'none' : 'block'}">
           ${recentTrainings.map(t => {
             let total = 0, goods = 0, oks = 0, bads = 0;
             for (const pid in t.attendance || {}) {
@@ -1734,6 +1764,7 @@ function renderTraining() {
               </div>
             `;
           }).join('')}
+          </div>
         </div>
       ` : `
         <div class="empty-state">
@@ -1913,6 +1944,7 @@ function renderMatchDetail() {
     '</div>',
     '<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">',
     '<button class="btn btn-small btn-secondary" style="width:auto;" data-mi="' + m.id + '" onclick="startPoll(this.dataset.mi,\'spieler\')">📲 Telegram-Umfrage</button>',
+    (m.pollId ? '<button class="btn btn-small btn-secondary" style="width:auto;" onclick="loadPollResults(' + m.id + ')">📥 Ergebnisse laden</button>' : ''),
     '<button class="btn btn-small btn-danger" style="width:auto;" onclick="if(confirm(\'Spiel löschen?\')){deleteMatch(' + m.id + ');closeMatchDetail();}">🗑️ Löschen</button>',
     '</div></div>',
     '<div class="card"><div class="card-title">📋 Aufstellung</div>',
@@ -1968,6 +2000,127 @@ function renderMatchDetail() {
 
 function toggleCollapse(key) {
   uiCollapsed[key] = !uiCollapsed[key];
+  render();
+}
+
+function calendarDayClick(dateStr) {
+  const existingTraining = state.trainings.find(t => t.date === dateStr);
+  const existingMatch = state.matches.find(m => m.date === dateStr);
+  const d = new Date(dateStr + 'T12:00:00');
+  const dayName = d.toLocaleDateString('de-DE', { weekday: 'long' });
+  const hasTrainingData = existingTraining && Object.keys(existingTraining.attendance || {}).length > 0;
+
+  let html = '<h2>' + formatDateLong(dateStr) + '</h2>';
+  html += '<div style="display:flex;flex-direction:column;gap:8px;margin-top:8px;">';
+
+  if (!hasTrainingData && dateStr < todayStr()) {
+    html += '<button class="btn btn-primary" onclick="addPastTrainingForDate(\'' + dateStr + '\');this.closest(\'.modal-overlay\').remove();">⚽ Training nachtragen</button>';
+  }
+  if (dateStr === todayStr()) {
+    html += '<button class="btn btn-primary" onclick="addTodayTraining(\'' + dateStr + '\')">⚽ Training für heute planen</button>';
+  }
+  if (dateStr > todayStr()) {
+    html += '<button class="btn btn-primary" onclick="this.closest(\'.modal-overlay\').remove();addFutureTrainingForDate(\'' + dateStr + '\')">⚽ Training planen</button>';
+  }
+  if (hasTrainingData && dateStr < todayStr()) {
+    html += '<button class="btn btn-primary" onclick="navigateToTrainingDate(\'' + dateStr + '\');document.querySelector(\'.modal-overlay\')?.remove();">⚽ Training anzeigen</button>';
+  }
+  if (existingTraining && !hasTrainingData) {
+    html += '<button class="btn btn-danger btn-small" style="width:auto;margin-top:4px;" onclick="if(confirm(\'Training löschen?\')){state.trainings=state.trainings.filter(function(t){return t.date!==\'' + dateStr + '\'});saveState();document.querySelector(\'.modal-overlay\')?.remove();render();}">🗑️ Trainingseintrag löschen</button>';
+  }
+  if (!existingMatch) {
+    html += '<button class="btn btn-secondary" onclick="addMatchForDate(\'' + dateStr + '\');this.closest(\'.modal-overlay\').remove();">📋 Spieltag hinzufügen</button>';
+  }
+  if (existingMatch) {
+    html += '<div style="font-size:13px;color:var(--text-secondary);">✅ Spieltag bereits eingetragen <button class="btn btn-small btn-secondary" style="width:auto;" onclick="openMatchDetail(' + existingMatch.id + ');document.querySelector(\'.modal-overlay\')?.remove();">Öffnen</button></div>';
+  }
+
+  html += '</div>';
+  html += '<button class="btn btn-secondary" style="margin-top:12px;width:100%;" onclick="this.closest(\'.modal-overlay\').remove()">Schließen</button>';
+  showModal(html);
+}
+
+function addTodayTraining(dateStr) {
+  document.querySelector('.modal-overlay')?.remove();
+  var modal = showModal(`
+    <h2>⚽ Training für heute planen</h2>
+    <label>Uhrzeit von</label>
+    <input type="time" id="training-time-from" value="${state.settings.trainingTime || '17:00'}">
+    <label>Uhrzeit bis</label>
+    <input type="time" id="training-time-to" value="${state.settings.trainingTimeEnd || '18:30'}">
+    <button class="btn btn-primary" onclick="savePlannedTraining('${dateStr}')">Training anlegen</button>
+    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Abbrechen</button>
+  `);
+}
+
+function savePlannedTraining(dateStr) {
+  var from = $('#training-time-from')?.value || state.settings.trainingTime || '17:00';
+  var to = $('#training-time-to')?.value || state.settings.trainingTimeEnd || '18:30';
+  var existing = state.trainings.find(t => t.date === dateStr);
+  if (existing) {
+    existing.time = from;
+    existing.timeEnd = to;
+    if (!existing.attendance) existing.attendance = {};
+    saveState();
+  } else {
+    state.trainings.push({ id: Date.now(), date: dateStr, time: from, timeEnd: to, attendance: {}, season: state.settings.season });
+    saveState();
+  }
+  document.querySelector('.modal-overlay')?.remove();
+  navigate('training');
+}
+
+function addFutureTrainingForDate(dateStr) {
+  state.trainings.push({ id: Date.now(), date: dateStr, attendance: {}, time: state.settings.trainingTime || '17:00', timeEnd: state.settings.trainingTimeEnd || '18:30', season: state.settings.season });
+  saveState();
+  render();
+}
+
+function addPastTrainingForDate(dateStr) {
+  if (state.trainings.find(t => t.date === dateStr)) return;
+  state.trainings.push({ id: Date.now(), date: dateStr, attendance: {}, season: state.settings.season });
+  state.trainingActive = true;
+  state.trainingDate = dateStr;
+  currentTrainingAttendance = {};
+  saveState();
+  navigate('training');
+}
+
+function addMatchForDate(dateStr) {
+  const modal = showModal(`
+    <h2>Spiel hinzufügen</h2>
+    <label>Datum: ${formatDateLong(dateStr)}</label>
+    <label>Gegner</label>
+    <input type="text" id="match-opponent-input" placeholder="z.B. SV Baden-Baden" autofocus>
+    <label>Anstoßzeit</label>
+    <input type="time" id="match-time-input" value="13:00">
+    <label>Ort</label>
+    <input type="text" id="match-location-input" placeholder="z.B. FVH" value="${state.settings.trainingLocation || 'FVH'}">
+    <div style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+      <input type="checkbox" id="match-is-home" checked style="width:auto;">
+      <label>Heimspiel</label>
+    </div>
+    <button class="btn btn-primary" onclick="saveMatchFromCalendar('${dateStr}')">Speichern</button>
+    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Abbrechen</button>
+  `);
+  setTimeout(() => $('#match-opponent-input')?.focus(), 100);
+}
+
+function saveMatchFromCalendar(dateStr) {
+  const opponent = $('#match-opponent-input')?.value?.trim();
+  if (!opponent) return alert('Gegner eingeben');
+  const time = $('#match-time-input')?.value || '';
+  const location = $('#match-location-input')?.value?.trim() || '';
+  const isHome = $('#match-is-home')?.checked || false;
+  state.matches.push({
+    id: Date.now(), date: dateStr, opponent, time, location, isHome,
+    season: state.settings.season, poll: {}, playerRatings: {},
+    lineup: null, kader: null,
+    homeGoals: null, awayGoals: null,
+    tasks: { booth: [], cake: [], setup: [], teardown: [], laundry: [] }
+  });
+  saveState();
+  document.querySelector('.modal-overlay')?.remove();
   render();
 }
 
@@ -2044,6 +2197,7 @@ function renderCalendar() {
           const day = i + 1;
           const dateStr = `${year}-${String(month+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
           const isScheduled = scheduledTrainings.some(t => t.date === dateStr);
+          const isPlanned = state.trainings.some(t => t.date === dateStr);
           const isMatch = getSeasonMatches().some(m => m.date === dateStr);
           const isExcused = isExceptionDate(dateStr);
           const isToday = dateStr === today;
@@ -2063,13 +2217,17 @@ function renderCalendar() {
             });
             title = '🚫 ' + (exc && exc.reason ? exc.reason : 'Kein Training');
             label = '🚫';
+          } else if (isPlanned) {
+            cls += ' training';
+            title = '⚽ Training ' + (state.settings.trainingTime || '17:00') + '–' + (state.settings.trainingTimeEnd || '18:30');
+            label = '⚽';
           } else if (isScheduled) {
             cls += ' training';
             title = '⚽ Training ' + (state.settings.trainingTime || '17:00') + '–' + (state.settings.trainingTimeEnd || '18:30');
             label = '⚽';
           }
 
-          return '<div class="' + cls + '" title="' + title + '" style="' + (isToday ? 'border:2px solid var(--primary);font-weight:800;' : '') + 'flex-direction:column;gap:0;">' + day + '<div class="day-label">' + label + '</div></div>';
+          return '<div class="' + cls + '" title="' + title + '" onclick="calendarDayClick(\'' + dateStr + '\')" style="cursor:pointer;' + (isToday ? 'border:2px solid var(--primary);font-weight:800;' : '') + 'flex-direction:column;gap:0;">' + day + '<div class="day-label">' + label + '</div></div>';
         }).join('')}
       </div>
     </div>
@@ -2181,7 +2339,7 @@ function toggleTrainingDay(day) {
   days.sort((a,b) => 'Mo Di Mi Do Fr Sa So'.indexOf(a) - 'Mo Di Mi Do Fr Sa So'.indexOf(b));
   saveState();
   render();
-  fetch('http://localhost:3000/api/settings/trainingdays', {
+  fetch('/api/settings/trainingdays', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ days })
   }).catch(() => {});
 }
